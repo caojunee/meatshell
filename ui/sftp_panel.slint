@@ -398,6 +398,12 @@ export component SftpPanel inherits Rectangle {
     callback copy-path(string);
     callback new-folder(string /* parent dir */);
     callback new-file(string /* parent dir */);
+    // Upload the files / folders on the OS clipboard into `dir` (#508).
+    callback paste-upload(string /* remote dir */);
+    // The keymap (src/app/shortcuts.rs): which app action a key is, "" if none.
+    callback match-shortcut(string, bool, bool, bool, bool) -> string;
+    // A key the file list does not handle, for the terminal (focus moves back).
+    callback forward-key(string, bool /* ctrl */, bool /* alt */, bool /* shift */);
     // Drag-to-dock: empty areas of the panel are a grab handle; coordinates are
     // reported in window space so the parent can compute the target edge (#dock).
     callback dock-drag-move(length /* abs-x */, length /* abs-y */);
@@ -1163,6 +1169,36 @@ export component SftpPanel inherits Rectangle {
                 file-area := Rectangle {
                     vertical-stretch: 1;
                     clip: true;
+                    // Keyboard focus for the file list (#508): clicking a row or
+                    // the whitespace focuses it, the paste chord uploads the
+                    // clipboard's files, and every other key goes back to the
+                    // terminal so no keystroke is lost. 0×0 at the area origin,
+                    // outside the scroll view, so scrolling never clips it away.
+                    file-keys := FocusScope {
+                        x: 0; y: 0;
+                        width: 0; height: 0;
+                        key-pressed(event) => {
+                            if (event.text == Key.Shift || event.text == Key.ShiftR
+                                    || event.text == Key.Control || event.text == Key.ControlR
+                                    || event.text == Key.Alt || event.text == Key.AltGr
+                                    || event.text == Key.Meta || event.text == Key.MetaR) {
+                                // A bare modifier: wait for the chord.
+                                accept
+                            } else if (root.match-shortcut(event.text, event.modifiers.control,
+                                        event.modifiers.meta, event.modifiers.alt,
+                                        event.modifiers.shift) == "paste"
+                                    || (event.modifiers.control && !event.modifiers.alt
+                                        && (event.text == "v" || event.text == "V"))) {
+                                root.paste-upload(root.current-path);
+                                accept
+                            } else {
+                                root.forward-key(event.text,
+                                    Theme.is-mac ? event.modifiers.meta : event.modifiers.control,
+                                    event.modifiers.alt, event.modifiers.shift);
+                                accept
+                            }
+                        }
+                    }
                     ScrollView {
                         width: parent.width;
                         height: parent.height;
@@ -1209,6 +1245,7 @@ export component SftpPanel inherits Rectangle {
                                     }
                                     clicked => {
                                         root.selected-row = i;
+                                        file-keys.focus();
                                         if (root.shift-click-pending) {
                                             root.shift-click-pending = false;
                                         } else {
@@ -1359,6 +1396,7 @@ export component SftpPanel inherits Rectangle {
                                 vertical-stretch: 1;
                                 min-height: 24px;
                                 ws-ta := TouchArea {
+                                    clicked => { file-keys.focus(); }
                                     pointer-event(ev) => {
                                         if (ev.kind == PointerEventKind.down
                                                 && ev.button == PointerEventButton.right) {
@@ -1413,7 +1451,7 @@ export component SftpPanel inherits Rectangle {
                         x: root.menu-x;
                         y: root.menu-y;
                         width: 148px;
-                        height: 14 * 27px + 8px;
+                        height: 15 * 27px + 8px;
                         Rectangle {
                             background: Theme.popup-bg;
                             border-radius: Theme.radius-sm;
@@ -1476,6 +1514,15 @@ export component SftpPanel inherits Rectangle {
                                     clicked => { root.delete(root.menu-target); }
                                 }
                                 Rectangle { height: 1px; background: Theme.border-subtle; }
+                                // Upload copied files (#508): into the right-clicked
+                                // folder, else the folder being shown.
+                                SftpMenuItem {
+                                    label: @tr("Paste");
+                                    clicked => {
+                                        root.paste-upload(root.menu-target != "" && root.menu-target-is-dir
+                                            ? root.menu-target : root.current-path);
+                                    }
+                                }
                                 SftpMenuItem {
                                     label: @tr("New folder");
                                     clicked => { root.new-folder(root.current-path); }

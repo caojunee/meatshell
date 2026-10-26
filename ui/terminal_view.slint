@@ -403,6 +403,7 @@ export component TerminalView inherits Rectangle {
     callback sftp-download(string);
     callback sftp-open-file(string);                // double-click a file (#493)
     callback sftp-upload-clicked(string, bool);
+    callback sftp-paste-upload(string);             // upload clipboard files (#508)
     callback sftp-refresh(string);
     callback sftp-tree-expand(string);
     callback sftp-delete(string);
@@ -2262,6 +2263,14 @@ export component TerminalView inherits Rectangle {
             download(path)      => { root.sftp-download(path); }
             open-file(path)     => { root.sftp-open-file(path); }
             upload-clicked(dir, folder) => { root.sftp-upload-clicked(dir, folder); }
+            paste-upload(dir)   => { root.sftp-paste-upload(dir); }
+            match-shortcut(t, c, m, a, s) => { return root.match-shortcut(t, c, m, a, s, false); }
+            // A key typed while the file list had focus belongs to the shell:
+            // send it and move focus back to the terminal.
+            forward-key(key, ctrl, alt, shift) => {
+                root.send-key(key, ctrl, alt, shift);
+                root.focus-pending = true;
+            }
             refresh(path)       => { root.sftp-refresh(path); }
             tree-expand(path)   => { root.sftp-tree-expand(path); }
             delete(path)        => { root.sftp-delete(path); }

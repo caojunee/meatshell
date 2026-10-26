@@ -1318,6 +1318,8 @@ export component AppWindow inherits Window {
     callback sftp-open-file(string /* tab-id */, string /* remote-path */);   // (#493)
     // Trigger an upload: Rust opens a file-picker dialog then transfers.
     callback sftp-upload-clicked(string /* tab-id */, string /* remote-dir */, bool /* folder */);
+    // Upload the files / folders on the OS clipboard (#508).
+    callback sftp-paste-upload(string /* tab-id */, string /* remote-dir */);
     // Refresh the current directory listing.
     callback sftp-refresh(string /* tab-id */, string /* path */);
     // Toggle expand/collapse of a tree node (also navigates to that directory).
@@ -2282,6 +2284,7 @@ export component AppWindow inherits Window {
                         sftp-download(path) => { root.sftp-download(term.id, path); }
                         sftp-open-file(path) => { root.sftp-open-file(term.id, path); }
                         sftp-upload-clicked(dir, folder) => { root.sftp-upload-clicked(term.id, dir, folder); }
+                        sftp-paste-upload(dir) => { root.sftp-paste-upload(term.id, dir); }
                         sftp-refresh(path) => { root.sftp-refresh(term.id, path); }
                         sftp-tree-expand(path) => { root.sftp-tree-expand(term.id, path); }
                         sftp-toggle-select(i) => { root.sftp-toggle-select(term.id, i); }

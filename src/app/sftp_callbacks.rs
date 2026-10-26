@@ -193,26 +193,10 @@ pub(super) fn wire_sftp_callbacks(
                 let tab_id = tab_id.to_string();
                 let remote_dir = remote_dir.to_string();
                 let sftp_handles = sftp_handles.clone();
-                // Session-sync upload (#sync): when both the sync toggle and the
-                // "sync upload" setting are on, mirror the upload to every other
-                // online session — each into *that session's own* current SFTP
-                // directory (paths differ between sessions, e.g. /home/jeff vs
-                // /home/root, so the active session's path can't be reused).
-                // Gather targets on the UI thread (Slint models aren't Send).
-                let sync_targets: Vec<(String, String)> = weak
+                // Gather sync targets on the UI thread (Slint models aren't Send).
+                let sync_targets = weak
                     .upgrade()
-                    .filter(|w| w.get_sync_input() && w.get_sync_upload_enabled())
-                    .map(|w| {
-                        let paths = terminal_sftp_paths(&w);
-                        let handles = sftp_handles.lock().ok();
-                        handles
-                            .iter()
-                            .flat_map(|h| h.keys())
-                            .filter(|id| *id != &tab_id)
-                            .filter_map(|id| paths.get(id).map(|dir| (id.clone(), dir.clone())))
-                            .filter(|(_, dir)| !dir.is_empty())
-                            .collect()
-                    })
+                    .map(|w| upload_sync_targets(&w, &sftp_handles, &tab_id))
                     .unwrap_or_default();
                 let owner = weak
                     .upgrade()
@@ -238,25 +222,50 @@ pub(super) fn wire_sftp_callbacks(
                     if locals.is_empty() {
                         return;
                     }
-                    if let Ok(handles) = sftp_handles.lock() {
-                        if let Some(h) = handles.get(&tab_id) {
-                            for local in &locals {
-                                h.upload(local.clone(), remote_dir.clone());
-                            }
-                        }
-                        // Mirror to the other online sessions, each into its own
-                        // current SFTP directory.
-                        for (id, dir) in &sync_targets {
-                            if let Some(h) = handles.get(id) {
-                                for local in &locals {
-                                    h.upload(local.clone(), dir.clone());
-                                }
-                            }
-                        }
-                    }
+                    queue_uploads(&sftp_handles, &tab_id, &remote_dir, &locals, &sync_targets);
                 });
             },
         );
+    }
+
+    // Paste files / folders copied in the OS file manager or an IDE to upload
+    // them into the remote directory (#508). Right-click › Paste, or the paste
+    // chord while the file list has focus.
+    {
+        let sftp_handles = sftp_handles.clone();
+        let weak = window.as_weak();
+        window.on_sftp_paste_upload(move |tab_id: SharedString, remote_dir: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let tab_id = tab_id.to_string();
+            let remote_dir = remote_dir.to_string();
+            if remote_dir.is_empty() {
+                return;
+            }
+            let locals = clipboard_upload_paths();
+            if locals.is_empty() {
+                set_sftp_status(
+                    &w,
+                    &tab_id,
+                    t(
+                        "剪贴板里没有文件。请先在文件管理器中复制文件或文件夹，再粘贴到这里。",
+                        "No files on the clipboard. Copy files or folders in your file manager, then paste them here.",
+                    ),
+                );
+                return;
+            }
+            let sync_targets = upload_sync_targets(&w, &sftp_handles, &tab_id);
+            queue_uploads(&sftp_handles, &tab_id, &remote_dir, &locals, &sync_targets);
+            w.set_download_open(true);
+            set_sftp_status(
+                &w,
+                &tab_id,
+                &format!(
+                    "{} {} → {remote_dir}",
+                    t("正在上传", "Uploading"),
+                    upload_summary(&locals)
+                ),
+            );
+        });
     }
 
     // Refresh the current directory listing.
@@ -812,3 +821,177 @@ pub(super) fn wire_sftp_callbacks(
 // ---------------------------------------------------------------------------
 // Raw keystroke forwarding and PTY resize
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Upload helpers shared by the upload button and paste-to-upload (#508)
+// ---------------------------------------------------------------------------
+
+/// Session-sync upload (#sync): when both the sync toggle and the "sync
+/// upload" setting are on, every other online session also receives the
+/// upload, each into *its own* current SFTP directory (paths differ between
+/// sessions, e.g. /home/jeff vs /home/root). Empty otherwise.
+fn upload_sync_targets(
+    w: &AppWindow,
+    sftp_handles: &SftpHandles,
+    tab_id: &str,
+) -> Vec<(String, String)> {
+    if !(w.get_sync_input() && w.get_sync_upload_enabled()) {
+        return Vec::new();
+    }
+    let paths = terminal_sftp_paths(w);
+    let Ok(handles) = sftp_handles.lock() else {
+        return Vec::new();
+    };
+    handles
+        .keys()
+        .filter(|id| id.as_str() != tab_id)
+        .filter_map(|id| paths.get(id).map(|dir| (id.clone(), dir.clone())))
+        .filter(|(_, dir)| !dir.is_empty())
+        .collect()
+}
+
+/// Queue `locals` (files or folders) for upload into `remote_dir` of
+/// `tab_id`, and into each sync target's own directory.
+fn queue_uploads(
+    sftp_handles: &SftpHandles,
+    tab_id: &str,
+    remote_dir: &str,
+    locals: &[std::path::PathBuf],
+    sync_targets: &[(String, String)],
+) {
+    let Ok(handles) = sftp_handles.lock() else {
+        return;
+    };
+    if let Some(h) = handles.get(tab_id) {
+        for local in locals {
+            h.upload(local.clone(), remote_dir.to_string());
+        }
+    }
+    for (id, dir) in sync_targets {
+        if let Some(h) = handles.get(id) {
+            for local in locals {
+                h.upload(local.clone(), dir.clone());
+            }
+        }
+    }
+}
+
+/// The files and folders on the OS clipboard (Explorer / Finder / an IDE's
+/// "Copy"), or nothing when it holds no file list.
+fn clipboard_upload_paths() -> Vec<std::path::PathBuf> {
+    let listed = arboard::Clipboard::new()
+        .and_then(|mut clipboard| clipboard.get().file_list())
+        .unwrap_or_default();
+    upload_candidates(listed, |path| path.exists())
+}
+
+/// Keep the paths that still exist, in order, without duplicates.
+fn upload_candidates(
+    paths: Vec<std::path::PathBuf>,
+    exists: impl Fn(&std::path::Path) -> bool,
+) -> Vec<std::path::PathBuf> {
+    let mut seen = std::collections::HashSet::new();
+    paths
+        .into_iter()
+        .filter(|path| exists(path) && seen.insert(path.clone()))
+        .collect()
+}
+
+/// The first path's name and how many more paths follow.
+fn upload_summary_parts(paths: &[std::path::PathBuf]) -> Option<(String, usize)> {
+    let first = paths.first()?;
+    let name = first
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| first.to_string_lossy().into_owned());
+    Some((name, paths.len() - 1))
+}
+
+/// "app.jar" for one path; "app.jar and 2 more" / "app.jar 等 3 项" for several.
+fn upload_summary(paths: &[std::path::PathBuf]) -> String {
+    match upload_summary_parts(paths) {
+        None => String::new(),
+        Some((name, 0)) => name,
+        Some((name, more)) if crate::i18n::is_en() => format!("{name} and {more} more"),
+        Some((name, more)) => format!("{name} 等 {} 项", more + 1),
+    }
+}
+
+/// Show `message` in the SFTP status line of `tab_id`.
+fn set_sftp_status(w: &AppWindow, tab_id: &str, message: &str) {
+    use slint::Model as _;
+    let terminals = w.get_terminals();
+    for i in 0..terminals.row_count() {
+        if let Some(mut row) = terminals.row_data(i) {
+            if row.id.as_str() == tab_id {
+                row.sftp_status = message.into();
+                terminals.set_row_data(i, row);
+                return;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod paste_upload_tests {
+    use super::{upload_candidates, upload_summary_parts};
+    use std::path::PathBuf;
+
+    /// Real OS clipboard: copy two files as a file list (what Explorer /
+    /// Finder do) and read them back. Touches the clipboard, so ignored by
+    /// default: `cargo test -- --ignored clipboard_file_list_round_trip`.
+    #[test]
+    #[ignore]
+    fn clipboard_file_list_round_trip() {
+        let dir = std::env::temp_dir().join(format!("meatshell-paste-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("app.jar");
+        let b = dir.join("conf");
+        std::fs::write(&a, b"jar").unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let mut clipboard = arboard::Clipboard::new().unwrap();
+        let saved_text = clipboard.get_text().ok();
+        clipboard.set().file_list(&[&a, &b]).unwrap();
+        let read = super::clipboard_upload_paths();
+        // Put the user's clipboard text back before asserting.
+        if let Some(text) = saved_text {
+            let _ = clipboard.set_text(text);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let names: Vec<_> = read.iter().filter_map(|p| p.file_name()).collect();
+        assert_eq!(names, ["app.jar", "conf"], "{read:?}");
+    }
+
+    #[test]
+    fn candidates_keep_existing_paths_in_order_without_duplicates() {
+        let paths = vec![
+            PathBuf::from("C:/build/app.jar"),
+            PathBuf::from("C:/gone.txt"),
+            PathBuf::from("C:/build/conf"),
+            PathBuf::from("C:/build/app.jar"),
+        ];
+        let kept = upload_candidates(paths, |p| !p.ends_with("gone.txt"));
+        assert_eq!(
+            kept,
+            [PathBuf::from("C:/build/app.jar"), PathBuf::from("C:/build/conf")]
+        );
+        assert!(upload_candidates(Vec::new(), |_| true).is_empty());
+    }
+
+    #[test]
+    fn summary_names_the_first_file_and_counts_the_rest() {
+        assert_eq!(upload_summary_parts(&[]), None);
+        assert_eq!(
+            upload_summary_parts(&[PathBuf::from("/a/app.jar")]),
+            Some(("app.jar".to_string(), 0))
+        );
+        assert_eq!(
+            upload_summary_parts(&[
+                PathBuf::from("/a/app.jar"),
+                PathBuf::from("/a/b"),
+                PathBuf::from("c"),
+            ]),
+            Some(("app.jar".to_string(), 2))
+        );
+    }
+}
