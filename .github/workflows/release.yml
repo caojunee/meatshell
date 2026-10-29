@@ -1,6 +1,6 @@
 name: Release
 
-# Build native packages for Windows / Linux / macOS.
+# Build native packages for Windows / Linux.
 #  - Push a tag like `v0.2.3`  -> builds all platforms and attaches the archives
 #    to a GitHub Release.
 #  - Run manually (workflow_dispatch) -> builds all platforms and uploads them as
@@ -95,14 +95,6 @@ jobs:
             target: aarch64-unknown-linux-gnu  # builds the Linux ARM64 .tar.gz (#82)
             name: linux-aarch64
             bin: meatshell
-          - os: macos-14               # Apple Silicon
-            target: aarch64-apple-darwin
-            name: macos-aarch64
-            bin: meatshell
-          - os: macos-14               # Cross-compile Intel Mac on Apple Silicon
-            target: x86_64-apple-darwin
-            name: macos-x86_64
-            bin: meatshell
     steps:
       - uses: actions/checkout@v4
 
@@ -194,59 +186,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME:-dev}"
           STAGE="meatshell-${VERSION}-${{ matrix.name }}"
 
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            # ── Build a proper .app bundle ────────────────────────────────────
-            # Without a bundle macOS opens raw binaries in Terminal.app, which
-            # stays alive after the app exits and never shows a Dock icon.
-            APP="meatshell.app"
-            CONTENTS="$APP/Contents"
-            mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
-
-            cp "target/${{ matrix.target }}/release/meatshell" "$CONTENTS/MacOS/"
-            cp THIRD_PARTY_NOTICES.md docs/REMOTE_MCP.md "$CONTENTS/Resources/"
-
-            # Generate .icns from the 512×512 PNG using sips + iconutil (both
-            # ship with every macOS, no extra tooling needed in CI).
-            mkdir -p meatshell.iconset
-            sips -z 16  16  "assets/icon@512.png" --out meatshell.iconset/icon_16x16.png       >/dev/null
-            sips -z 32  32  "assets/icon@512.png" --out meatshell.iconset/icon_16x16@2x.png    >/dev/null
-            sips -z 32  32  "assets/icon@512.png" --out meatshell.iconset/icon_32x32.png        >/dev/null
-            sips -z 64  64  "assets/icon@512.png" --out meatshell.iconset/icon_32x32@2x.png    >/dev/null
-            sips -z 128 128 "assets/icon@512.png" --out meatshell.iconset/icon_128x128.png     >/dev/null
-            sips -z 256 256 "assets/icon@512.png" --out meatshell.iconset/icon_128x128@2x.png  >/dev/null
-            sips -z 256 256 "assets/icon@512.png" --out meatshell.iconset/icon_256x256.png     >/dev/null
-            sips -z 512 512 "assets/icon@512.png" --out meatshell.iconset/icon_256x256@2x.png  >/dev/null
-            sips -z 512 512 "assets/icon@512.png" --out meatshell.iconset/icon_512x512.png     >/dev/null
-            iconutil -c icns meatshell.iconset -o "$CONTENTS/Resources/meatshell.icns"
-
-            # Substitute __VERSION__ placeholder (strip leading 'v' from tag)
-            VERSION_NUM="${VERSION#v}"
-            sed "s/__VERSION__/${VERSION_NUM}/g" assets/Info.plist > "$CONTENTS/Info.plist"
-
-            # Ad-hoc code-sign the assembled bundle.
-            # The release profile strips the binary (Cargo.toml: strip = "symbols"),
-            # which invalidates the linker's automatic ad-hoc signature — on Apple
-            # Silicon that makes the OS refuse to launch it ("app is damaged").
-            # Re-signing the whole bundle here restores a valid (ad-hoc) signature,
-            # turning the fatal "damaged" error into the normal "unidentified
-            # developer" prompt that users can bypass via Open Anyway / xattr.
-            codesign --force --deep --sign - "$APP"
-            codesign --verify --verbose "$APP"
-
-            # Package with ditto (Apple's tool) — it preserves the bundle's
-            # signature and metadata. Plain `zip` mangles them and re-breaks the
-            # signature, which would reintroduce the "damaged" error.
-            #
-            # ⚠ KEEP THIS .zip (meatshell-<tag>-macos-<arch>.zip). Builds from
-            # v0.7.8 until the .dmg-aware updater download exactly this file
-            # name; newer builds prefer the .dmg below and fall back to it
-            # (src/update/inplace.rs `asset_names`). Retire it only once the
-            # zip's download count shows those older builds are gone.
-            # tests/update/inplace.rs guards this.
-            ditto -c -k --keepParent "$APP" "${STAGE}.zip"
-            echo "ASSET=${STAGE}.zip" >> "$GITHUB_ENV"
-
-          elif [ "${{ runner.os }}" = "Windows" ]; then
+          if [ "${{ runner.os }}" = "Windows" ]; then
             mkdir "$STAGE"
             cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$STAGE/"
             cp README.md README.en.md CHANGELOG.md THIRD_PARTY_NOTICES.md "$STAGE/" 2>/dev/null || true
@@ -285,50 +225,11 @@ jobs:
           cargo wix --no-build --nocapture --target ${{ matrix.target }} --output "meatshell-$VERSION-windows-x86_64.msi"
           echo "MSI=meatshell-$VERSION-windows-x86_64.msi" >> $env:GITHUB_ENV
 
-      # Drag-to-Applications disk image (#503): the download for manual
-      # installs, and the package dmg-aware builds prefer for one-click
-      # updates (they fall back to the .zip above, which stays for older
-      # builds). Installing into /Applications also keeps the app out of App
-      # Translocation, so one-click updates can replace it in place.
-      # Best-effort like the MSI: a hdiutil hiccup must not block the release.
-      - name: Build DMG (macOS)
-        if: runner.os == 'macOS'
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -eu
-          VERSION="${GITHUB_REF_NAME:-dev}"
-          DMG="meatshell-${VERSION}-${{ matrix.name }}.dmg"
-          ROOT="$(mktemp -d)/meatshell"
-          mkdir -p "$ROOT"
-          # ditto keeps the ad-hoc signature from the Package step intact.
-          ditto meatshell.app "$ROOT/meatshell.app"
-          ln -s /Applications "$ROOT/Applications"
-          # hdiutil on hosted runners intermittently fails with
-          # "Resource busy"; retry a few times before giving up.
-          for attempt in 1 2 3; do
-            if hdiutil create -volname "meatshell" -srcfolder "$ROOT" \
-                -fs HFS+ -format UDZO -ov "$DMG"; then
-              break
-            fi
-            [ "$attempt" = 3 ] && exit 1
-            sleep 5
-          done
-          hdiutil verify "$DMG"
-          echo "DMG=$DMG" >> "$GITHUB_ENV"
-
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
           path: ${{ env.ASSET }}
-
-      - name: Upload DMG artifact
-        if: runner.os == 'macOS' && env.DMG != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.name }}-dmg
-          path: ${{ env.DMG }}
 
       - name: Upload AppImage artifact
         if: matrix.name == 'linux-x86_64'
@@ -381,14 +282,6 @@ jobs:
         with:
           prerelease: ${{ contains(github.ref_name, '-remote.') }}
           files: ${{ env.MSI }}
-          fail_on_unmatched_files: false
-
-      - name: Attach DMG to GitHub Release
-        if: runner.os == 'macOS' && env.DMG != '' && startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          prerelease: ${{ contains(github.ref_name, '-remote.') }}
-          files: ${{ env.DMG }}
           fail_on_unmatched_files: false
 
   build-flatpak:

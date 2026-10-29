@@ -3,6 +3,11 @@
 All notable changes are documented here. 本文件记录所有重要变更。
 中英对照（中文在前，English after）.
 
+## [0.8.2] - 2026-10-29
+
+- **发布包只构建 Windows 与 Linux。** 本仓库的发布流程不再构建 macOS 版本，标签发布后只附带 Windows（.zip、.msi）与 Linux（tar.gz、.deb、AppImage、Flatpak）安装包。
+- **Release builds cover Windows and Linux only.** The macOS jobs were dropped from this fork's release workflow; a `v*` tag now publishes the Windows (.zip, .msi) and Linux (tar.gz, .deb, AppImage, Flatpak) packages.
+
 ## [0.8.0] - 2026-10-23
 
 - **中国大陆用户可通过下载镜像一键更新。** 界面为中文且系统时区为中国大陆时区（按 Asia/Shanghai 等时区名判断，新加坡、香港、台北等其他 UTC+8 地区仍直连 GitHub）时，一键更新可通过镜像下载。“设置 → 软件更新”新增“下载镜像”列表，内置 v4、v6、cdn、axisnow.gh-proxy.org 四个镜像，可添加或删除，右侧显示各下载源（含 GitHub）的测速结果。默认自动选择最快的源，也可点击某一行固定使用；失败时依次换用其他源，最后回到 GitHub。镜像只负责传输，所有下载仍按 GitHub 发布的 SHA-256 校验。

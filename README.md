@@ -21,8 +21,8 @@ JVM 压到几十 MB 原生级别。
 
 ## 下载与安装
 
-每次打 `v*` 标签，GitHub Actions 会自动构建 **Windows / Linux / macOS** 三平台二进制，
-发布到 [Releases](https://github.com/yituorou/meatshell/releases) 页面。
+每次打 `v*` 标签，GitHub Actions 会自动构建 **Windows / Linux** 二进制，
+发布到 [Releases](https://github.com/caojunee/meatshell/releases) 页面。
 
 ### Windows
 
@@ -59,24 +59,7 @@ sudo apt install -y --no-install-recommends \
 
 ### macOS
 
-下载得到的是 `.zip`，里面是 `meatshell.app` 应用程序包：
-
-```bash
-# 解压(aarch64 = Apple 芯片，x86_64 = Intel)
-unzip meatshell-*-macos-*.zip
-# 移到「应用程序」(可选，留在原地也行)
-mv meatshell.app /Applications/
-# 去掉「未签名应用」的隔离属性，否则会提示「meatshell 已损坏，无法打开」
-xattr -dr com.apple.quarantine /Applications/meatshell.app
-# 打开(或在「访达」里双击)
-open /Applications/meatshell.app
-```
-
-> 若未移到 `/Applications`，把上面两条路径换成 `.app` 实际所在位置(如 `~/Downloads/meatshell.app`)即可。
-
-> 需要 macOS 11 Big Sur 或更高版本，支持 Apple Silicon 和 Intel Mac。
-
-> 从源码构建见下方 [运行](#运行)。
+本仓库不提供 macOS 安装包。需要时请自行从源码构建（见下方 [运行](#运行)）。
 
 ## 功能
 

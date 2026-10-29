@@ -23,8 +23,8 @@ the tens-of-MB range of a native binary.
 ## Download & install
 
 Every `v*` tag triggers a GitHub Actions build that produces native binaries for
-**Windows / Linux / macOS**, published on the
-[Releases](https://github.com/yituorou/meatshell/releases) page.
+**Windows / Linux**, published on the
+[Releases](https://github.com/caojunee/meatshell/releases) page.
 
 ### Windows
 
@@ -64,24 +64,8 @@ sudo apt install -y --no-install-recommends \
 
 ### macOS
 
-The download is a `.zip` containing the `meatshell.app` bundle:
-
-```bash
-# Unzip (aarch64 = Apple Silicon, x86_64 = Intel)
-unzip meatshell-*-macos-*.zip
-# Move it to Applications (optional — it also runs in place)
-mv meatshell.app /Applications/
-# Clear the quarantine flag, otherwise macOS says "meatshell is damaged and can't be opened"
-xattr -dr com.apple.quarantine /Applications/meatshell.app
-# Open it (or double-click in Finder)
-open /Applications/meatshell.app
-```
-
-> If you didn't move it to `/Applications`, point both paths above at wherever the `.app` actually is (e.g. `~/Downloads/meatshell.app`).
-
-> Requires macOS 11 Big Sur or later. Both Apple Silicon and Intel Macs are supported.
-
-> To build from source, see [Running](#running) below.
+This fork does not publish macOS packages. Build from source instead
+(see [Running](#running) below).
 
 ## Features
 
