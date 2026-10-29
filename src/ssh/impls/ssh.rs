@@ -23,6 +23,7 @@ use crate::i18n::t;
 use super::connection::{
     connect_ssh_stream, disconnect_ssh, network_stage, HandshakeHandler, HostKeyWait,
 };
+use super::cwd::CwdTracker;
 use super::structs::*;
 
 struct RuntimeTrigger {
@@ -508,61 +509,6 @@ fn bound_prompt_setup_echo(text: &mut String) {
     *text = tail;
 }
 
-/// Extract the remote path from an OSC 7 sequence embedded in `text`.
-///
-/// Format: `ESC ] 7 ; file://hostname/path BEL`
-/// Returns the decoded absolute path component (without hostname).
-pub fn extract_osc7_path(text: &str) -> Option<String> {
-    extract_osc7_end(text).map(|(path, _)| path)
-}
-
-/// Like [`extract_osc7_path`] but also returns the byte index just past the OSC
-/// sequence's terminator, so the caller can cut everything up to and including
-/// it — used to discard the echoed setup line (which may wrap) at connect (#98).
-fn extract_osc7_end(text: &str) -> Option<(String, usize)> {
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if bytes[i] != 0x1b || bytes[i + 1] != b']' {
-            i += 1;
-            continue;
-        }
-        let osc_start = i + 2;
-        i += 2;
-        // Scan for BEL (0x07) or ST (ESC \)
-        let mut end = i;
-        let mut term_len = 0;
-        while end < bytes.len() {
-            if bytes[end] == 0x07 {
-                term_len = 1;
-                break;
-            } else if bytes[end] == 0x1b && end + 1 < bytes.len() && bytes[end + 1] == b'\\' {
-                term_len = 2;
-                break;
-            }
-            end += 1;
-        }
-        if end >= bytes.len() {
-            break;
-        }
-        if let Ok(content) = std::str::from_utf8(&bytes[osc_start..end]) {
-            if let Some(rest) = content.strip_prefix("7;file://") {
-                // rest = "hostname/path" or "/path" (empty hostname)
-                let path = if rest.starts_with('/') {
-                    rest.to_string()
-                } else if let Some(slash) = rest.find('/') {
-                    rest[slash..].to_string()
-                } else {
-                    "/".to_string()
-                };
-                return Some((url_decode(&path), end + term_len));
-            }
-        }
-        i = end + term_len.max(1);
-    }
-    None
-}
-
 /// Find a meatshell command-capture sequence (`ESC ] 697 ; <command> BEL|ST`)
 /// emitted by the shell hook (#113). Returns the command text and the byte
 /// range of the whole escape sequence, so the caller can strip it before the
@@ -603,38 +549,6 @@ pub fn extract_osc_command(text: &str) -> Option<(String, std::ops::Range<usize>
         i = end + term_len;
     }
     None
-}
-
-/// Percent-decode a URL path segment (e.g. `%20` → space).
-fn url_decode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let h1 = chars.next();
-            let h2 = chars.next();
-            match (h1, h2) {
-                (Some(a), Some(b)) => {
-                    let hex = format!("{a}{b}");
-                    if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                        result.push(byte as char);
-                    } else {
-                        result.push('%');
-                        result.push(a);
-                        result.push(b);
-                    }
-                }
-                (Some(a), None) => {
-                    result.push('%');
-                    result.push(a);
-                }
-                _ => result.push('%'),
-            }
-        } else {
-            result.push(c);
-        }
-    }
-    result
 }
 
 async fn kill_remote_process(
@@ -1847,6 +1761,7 @@ async fn run_session(
     let mut extended_decoder = crate::terminal::TerminalEncoding::new(&session.encoding);
     let terminal_encoder = crate::terminal::TerminalEncoding::new(&session.encoding);
     let mut trigger_engine = TriggerEngine::new(&session.triggers);
+    let mut cwd_tracker = CwdTracker::new(prompt_setup_supported);
 
     // --- Main pump ------------------------------------------------------
     loop {
@@ -1897,6 +1812,7 @@ async fn run_session(
                         // Only log the byte count — never the bytes themselves,
                         // which are raw keystrokes and may contain passwords (#15).
                         tracing::debug!("ssh channel.data len={} bytes", bytes.len());
+                        cwd_tracker.input(&bytes);
                         let bytes = terminal_encoder.encode(&bytes);
                         if let Err(err) = channel.data(&bytes[..]).await {
                             let _ = events.send(SessionEvent::Closed(format!("{}: {err}", t("写入失败", "write failed"))));
@@ -2056,7 +1972,7 @@ async fn run_session(
                                     // the prompt shows and the cwd updates.
                                     if !leftover.is_empty() {
                                         let text = terminal_decoder.decode(&leftover);
-                                        if let Some(cwd) = extract_osc7_path(&text) {
+                                        if let Some(cwd) = cwd_tracker.feed(&text) {
                                             let _ =
                                                 events.send(SessionEvent::CwdChanged(cwd));
                                         }
@@ -2131,6 +2047,9 @@ async fn run_session(
                                     }
                                 }
                             }
+                            if let Some(cwd) = cwd_tracker.feed(&painted) {
+                                let _ = events.send(SessionEvent::CwdChanged(cwd));
+                            }
                             let _ = events.send(SessionEvent::Output(painted));
                             let _ = channel.data(prompt_setup.as_bytes()).await;
                             continue;
@@ -2149,21 +2068,12 @@ async fn run_session(
                         if let Some(tail) = take_after_prompt_setup_done(&mut echo_buf) {
                             suppress_echo = false;
                             late_prompt_echo_pending = false;
-                            if let Some(cwd) = extract_osc7_path(&tail) {
-                                tracing::debug!("OSC7 cwd={:?}", cwd);
-                                let _ = events.send(SessionEvent::CwdChanged(cwd));
-                            }
                             tail
                         } else {
                                 bound_prompt_setup_echo(&mut echo_buf);
                                 continue; // keep buffering; show nothing yet
                             }
                         } else {
-                            // Scan for the OSC 7 CWD notification (cd-follow).
-                            if let Some(cwd) = extract_osc7_path(&chunk) {
-                                tracing::debug!("OSC7 cwd={:?}", cwd);
-                                let _ = events.send(SessionEvent::CwdChanged(cwd));
-                            }
                             let mut clean = chunk;
                             strip_pending_prompt_setup_echo(
                                 &mut clean,
@@ -2171,6 +2081,14 @@ async fn run_session(
                             );
                             clean
                         };
+
+                        // OSC 7 remains authoritative. Some Bash configurations
+                        // also report root's absolute directory in OSC 0/2 titles
+                        // after sudo discards our hook. Only complete control
+                        // strings count; visible prompt text never does.
+                        if let Some(cwd) = cwd_tracker.feed(&text) {
+                            let _ = events.send(SessionEvent::CwdChanged(cwd));
+                        }
 
                         // Capture commands run in the terminal via our OSC 697
                         // hook, and strip the sequence so it never reaches the
@@ -2189,6 +2107,7 @@ async fn run_session(
                             if append_enter {
                                 bytes.push(b'\r');
                             }
+                            cwd_tracker.input(&bytes);
                             let encoded = terminal_encoder.encode(&bytes);
                             if let Err(error) = channel.data(&encoded[..]).await {
                                 tracing::warn!("session trigger response failed: {error}");
@@ -2198,11 +2117,15 @@ async fn run_session(
                     }
                     Some(ChannelMsg::ExtendedData { data, ext: _ }) => {
                         let text = extended_decoder.decode(&data);
+                        if let Some(cwd) = cwd_tracker.feed(&text) {
+                            let _ = events.send(SessionEvent::CwdChanged(cwd));
+                        }
                         for (response, append_enter) in trigger_engine.feed(&text) {
                             let mut bytes = response.as_str().as_bytes().to_vec();
                             if append_enter {
                                 bytes.push(b'\r');
                             }
+                            cwd_tracker.input(&bytes);
                             let encoded = terminal_encoder.encode(&bytes);
                             if let Err(error) = channel.data(&encoded[..]).await {
                                 tracing::warn!("session trigger response failed: {error}");
