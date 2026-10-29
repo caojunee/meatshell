@@ -11,13 +11,13 @@ the tens-of-MB range of a native binary.
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/01-welcome-en.png" alt="Welcome / session management" width="800"><br>
-  <em>Welcome page: session management + local resource monitor sidebar</em>
+  <img src="docs/screenshots/01-welcome-en.png" alt="New tab / recent connections" width="800"><br>
+  <em>New tab: recent connections with session management on the left and local resources on the right</em>
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/02-terminal-htop.png" alt="Terminal + SFTP" width="800"><br>
-  <em>Tabbed terminal (full-screen btop) + SFTP file browser + remote resource monitoring</em>
+  <img src="docs/screenshots/02-terminal-sftp.png" alt="Terminal + SFTP" width="800"><br>
+  <em>Tabbed terminal + SFTP file browser + remote resource monitor with top processes</em>
 </p>
 
 ## Download & install
