@@ -534,7 +534,6 @@ export component InterfacePanel inherits Rectangle {
     in-out property <string> webdav-url;
     in-out property <string> webdav-username;
     in-out property <string> webdav-password;
-    in-out property <string> webdav-remote-path;
     in-out property <bool> webdav-accept-invalid-certs;
     in-out property <string> webdav-status;
     in-out property <bool> download-always-ask;
@@ -628,7 +627,7 @@ export component InterfacePanel inherits Rectangle {
     callback set-collapse-sidebar-default(bool);
     callback set-collapse-sftp-default(bool);
     callback set-sync-upload-enabled(bool);
-    callback save-webdav-settings(bool, string, string, string, string, bool);
+    callback save-webdav-settings(bool, string, string, string, bool);
     callback webdav-upload();
     callback webdav-download();
     callback set-download-always-ask(bool);
@@ -768,6 +767,9 @@ export component InterfacePanel inherits Rectangle {
 
                 settings-pages := VerticalLayout {
                     width: settings-scroll.visible-width;
+                    // Breathing room below the last row so it never looks cut off
+                    // against the card's bottom edge.
+                    padding-bottom: 18px;
 
             // --- Font page ---------------------------------------------
             if root.ifd-page == "font" : VerticalLayout {
@@ -1830,14 +1832,15 @@ export component InterfacePanel inherits Rectangle {
                 padding-left: 20px;
                 padding-right: 20px;
                 padding-top: 14px;
+                padding-bottom: 18px;
                 spacing: 10px;
                 alignment: start;
                 SectionHeader { text: "WEBDAV"; height: 24px; }
                 SettingRow {
                     label: root.lang-en ? "Enable WebDAV sync" : "启用 WebDAV 同步";
                     desc: root.lang-en
-                        ? "Manual upload/download only; meatshell will not connect on startup."
-                        : "仅手动上传/下载;meatshell 启动时不会自动连接。";
+                        ? "When enabled: checks the remote on startup and uploads after changes. Connections, quick commands and all settings sync; the WebDAV password itself is never uploaded."
+                        : "启用后：启动时检查远端，修改后自动上传。连接、快捷命令和全部设置都会同步；WebDAV 密码本身不会上传。";
                     show-divider: false;
                     Switch {
                         on: root.webdav-enabled;
@@ -1845,9 +1848,26 @@ export component InterfacePanel inherits Rectangle {
                     }
                 }
                 LabeledInput {
-                    label: root.lang-en ? "Endpoint URL" : "WebDAV 地址";
-                    placeholder: "https://nas:5006/all/ or https://nas:5006/all/meatshell-connections.json";
+                    label: root.lang-en ? "WebDAV folder" : "WebDAV 目录";
+                    placeholder: "https://nas:5006/all/ or https://nas:5006/all/meatshell/";
                     value <=> root.webdav-url;
+                }
+                Text {
+                    text: root.lang-en
+                        ? "The configured folder is where meatshell keeps its data (meatshell-backup.json today, more files later). Sub-folders are created automatically."
+                        : "这里填 WebDAV 目录：meatshell 的数据都放这个目录里（目前是 meatshell-backup.json，以后新增的文件也在这里），子目录会自动创建。";
+                    color: Theme.text-muted;
+                    font-size: 11px * Theme.panel-font;
+                    wrap: word-wrap;
+                }
+                Text {
+                    visible: root.webdav-url != "";
+                    text: (root.lang-en ? "Writes to: " : "实际写入：")
+                        + root.webdav-url + "/meatshell-backup.json";
+                    color: Theme.text-muted;
+                    font-size: 11px * Theme.panel-font;
+                    font-family: Theme.font-mono;
+                    wrap: word-wrap;
                 }
                 LabeledInput {
                     label: root.lang-en ? "Username" : "用户名";
@@ -1859,11 +1879,6 @@ export component InterfacePanel inherits Rectangle {
                     placeholder: root.lang-en ? "Optional" : "可选";
                     password: true;
                     value <=> root.webdav-password;
-                }
-                LabeledInput {
-                    label: root.lang-en ? "Remote file" : "远端文件";
-                    placeholder: "meatshell-connections.json";
-                    value <=> root.webdav-remote-path;
                 }
                 SettingRow {
                     label: root.lang-en ? "Trust self-signed / intranet certs" : "信任自签名/内网证书";
@@ -1884,7 +1899,7 @@ export component InterfacePanel inherits Rectangle {
                         clicked => {
                             root.save-webdav-settings(
                                 root.webdav-enabled, root.webdav-url, root.webdav-username,
-                                root.webdav-password, root.webdav-remote-path,
+                                root.webdav-password,
                                 root.webdav-accept-invalid-certs);
                         }
                     }

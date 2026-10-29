@@ -9,6 +9,7 @@
 import { Theme, ThemePalette } from "theme.slint";
 import { ModalScope, ModalLayer } from "modal.slint";
 import { LabeledInput, GhostButton } from "widgets.slint";
+import { AuxWindowChrome } from "aux_window.slint";
 
 // One row in the process table. Lives here (not app.slint) so both the main
 // window and this window can import it without a circular dependency.
@@ -20,6 +21,7 @@ export struct ProcRow {
     mem: string,       // "4.5"
     command: string,   // truncated args
     cpu-frac: float,   // 0.0..1.0, drives the row load bar
+    mem-frac: float,   // 0.0..1.0, drives the sidebar mini-table bar
     own-process: bool, // may terminate without root authentication
 }
 
@@ -161,86 +163,45 @@ export component ProcWindow inherits Window {
         active: !root.terminate-dialog-open;
         is-mac: root.is-mac;
         cancel-requested => { root.close-window(); }
-    VerticalLayout {
-        spacing: 0;
+    AuxWindowChrome {
+        width: parent.width;
+        height: parent.height;
+        title-text: @tr("Processes");
+        subtitle: root.host;
+        show-titlebar: root.custom-titlebar;
+        show-grip: root.custom-titlebar;
+        show-save: false;
+        dragged => { root.win-drag(); }
+        closed => { root.close-window(); }
+        resize-started => { root.win-resize-se(); }
 
-        // --- Custom titlebar (frameless platforms) -------------------------
-        if root.custom-titlebar : Rectangle {
-            height: 36px;
-            background: Theme.bg-elevated;
-            tb-drag := TouchArea {
-                pointer-event(e) => {
-                    if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
-                        root.win-drag();
-                    }
-                }
-            }
-            HorizontalLayout {
-                padding-left: 12px;
-                spacing: 8px;
-                VerticalLayout {
-                    alignment: center;
-                    Image {
-                        source: @image-url("../assets/icon.png");
-                        width: 16px;
-                        height: 16px;
-                    }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    Text {
-                        text: @tr("Processes") + (root.host != "" ? "  ·  " + root.host : "");
-                        color: Theme.text-secondary;
-                        font-size: Theme.fs-sm;
-                    }
-                }
-                Rectangle { horizontal-stretch: 1; }   // draggable spacer
-                // Close button.
-                Rectangle {
-                    width: 46px;
-                    background: close-ta.has-hover ? #e81123 : transparent;
-                    animate background { duration: 90ms; }
-                    close-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.close-window(); }
-                    }
-                    Text {
-                        text: "\u{E5CD}";
-                        font-family: "Material Icons";
-                        color: close-ta.has-hover ? white : Theme.text-secondary;
-                        font-size: 16px;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                }
-            }
-        }
+    VerticalLayout {
+        vertical-stretch: 1;
+        spacing: 0;
 
         // --- Table ----------------------------------------------------------
         VerticalLayout {
             padding: 12px;
             spacing: 8px;
 
-            // Column header.
-            HorizontalLayout {
-                padding-left: 6px;
-                padding-right: 6px;
-                spacing: 6px;
-                Text { text: "PID"; width: 56px; color: Theme.text-muted; font-size: Theme.fs-xs; }
-                Text { text: @tr("User"); width: 84px; color: Theme.text-muted; font-size: Theme.fs-xs; }
-                Text { text: "CPU%"; width: 52px; color: Theme.text-muted; font-size: Theme.fs-xs;
-                       horizontal-alignment: right; }
-                Text { text: "MEM%"; width: 52px; color: Theme.text-muted; font-size: Theme.fs-xs;
-                       horizontal-alignment: right; }
-                Text { text: @tr("Command"); horizontal-stretch: 1; color: Theme.text-muted; font-size: Theme.fs-xs; }
-            }
+            // Column header — a tinted band so the table has a clear top edge.
+            Rectangle {
+                height: 26px;
+                border-radius: Theme.radius-sm;
+                background: Theme.bg-root;
 
-            if root.action-status != "" : Text {
-                text: root.action-status;
-                color: root.action-busy ? Theme.text-muted
-                    : root.action-error ? Theme.danger : Theme.success;
-                font-size: Theme.fs-xs;
-                overflow: elide;
+                HorizontalLayout {
+                    padding-left: 6px;
+                    padding-right: 6px;
+                    spacing: 6px;
+                    Text { text: "PID"; width: 56px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: @tr("User"); width: 84px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: "CPU%"; width: 52px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center;
+                           horizontal-alignment: right; }
+                    Text { text: "MEM%"; width: 52px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center;
+                           horizontal-alignment: right; }
+                    Text { text: @tr("Command"); horizontal-stretch: 1; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                }
             }
 
             Flickable {
@@ -258,9 +219,10 @@ export component ProcWindow inherits Window {
                     }
 
                     for p in root.proc-list : Rectangle {
-                        height: 20px;
-                        border-radius: 2px;
+                        height: 24px;
+                        border-radius: 3px;
                         clip: true;
+                        background: row-touch.has-hover ? Theme.bg-hover : transparent;
 
                         row-touch := TouchArea {
                             pointer-event(e) => {
@@ -280,13 +242,15 @@ export component ProcWindow inherits Window {
                             }
                         }
 
-                        // CPU load bar behind the row.
-                        Rectangle {
-                            x: 0; y: 0;
-                            height: parent.height;
+                        // Heavy processes get an underline; idle rows stay clean
+                        // (a 1-3% bar at the row start read as a stray block).
+                        if p.cpu-frac > 0.5 : Rectangle {
+                            x: 0;
+                            y: parent.height - 2px;
+                            height: 2px;
                             width: parent.width * clamp(p.cpu-frac, 0.0, 1.0);
-                            background: p.cpu-frac > 0.5 ? Theme.warning.with-alpha(0.28)
-                                      : Theme.accent.with-alpha(0.20);
+                            background: Theme.warning;
+                            border-radius: 1px;
                         }
                         HorizontalLayout {
                             padding-left: 6px;
@@ -303,23 +267,60 @@ export component ProcWindow inherits Window {
                                     }
                                 }
                                 Text { text: p.pid; color: pid-touch.has-hover ? Theme.accent : Theme.text-secondary;
+                                       font-family: Theme.font-mono;
                                        font-size: Theme.fs-xs; vertical-alignment: center; }
                             }
                             Text { text: p.user; width: 84px; color: Theme.text-secondary;
                                    font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
-                            Text { text: p.cpu; width: 52px; color: Theme.text-primary;
+                            Text { text: p.cpu; width: 52px;
+                                   color: p.cpu-frac > 0.5 ? Theme.warning : Theme.text-primary;
                                    font-size: Theme.fs-xs; vertical-alignment: center;
                                    horizontal-alignment: right; }
                             Text { text: p.mem; width: 52px; color: Theme.text-secondary;
                                    font-size: Theme.fs-xs; vertical-alignment: center;
                                    horizontal-alignment: right; }
                             Text { text: p.command; horizontal-stretch: 1; color: Theme.text-muted;
+                                   font-family: Theme.font-mono;
                                    font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
                         }
                     }
                 }
             }
         }
+
+        // --- Status bar (also anchors the window's bottom edge) --------------
+        Rectangle {
+            height: 30px;
+            background: Theme.bg-panel-alt;
+
+            Rectangle {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: 1px;
+                background: Theme.border-subtle;
+            }
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 26px;   // leave room for the resize dots
+                spacing: 8px;
+                Text {
+                    text: root.action-status != ""
+                        ? root.action-status
+                        : @tr("Processes") + "  ·  " + root.proc-list.length;
+                    color: root.action-status == ""
+                        ? Theme.text-muted
+                        : root.action-busy ? Theme.text-muted
+                        : root.action-error ? Theme.danger : Theme.success;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+            }
+        }
+    }
     }
 
     proc-menu := PopupWindow {
@@ -450,28 +451,5 @@ export component ProcWindow inherits Window {
             }
         }
     }
-
-    // --- Bottom-right resize grip (frameless platforms) --------------------
-    if root.custom-titlebar : Rectangle {
-        width: 16px;
-        height: 16px;
-        x: root.width - self.width;
-        y: root.height - self.height;
-        TouchArea {
-            mouse-cursor: nwse-resize;
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
-                    root.win-resize-se();
-                }
-            }
-        }
-        // Classic dotted resize grip (a diagonal of 2px dots, bottom-right).
-        Rectangle { x: parent.width - 5px;  y: parent.height - 5px;  width: 2px; height: 2px;
-                    background: Theme.text-muted; }
-        Rectangle { x: parent.width - 9px;  y: parent.height - 5px;  width: 2px; height: 2px;
-                    background: Theme.text-muted; }
-        Rectangle { x: parent.width - 5px;  y: parent.height - 9px;  width: 2px; height: 2px;
-                    background: Theme.text-muted; }
-    }
-    }
+}
 }

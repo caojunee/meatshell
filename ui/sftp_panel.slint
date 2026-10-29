@@ -902,12 +902,12 @@ export component SftpPanel inherits Rectangle {
                         spacing: 0;
 
                         for node[i] in root.tree-nodes : Rectangle {
-                            height: 22px;
+                            height: 24px;
                             background: node-ta.has-hover
-                                ? Theme.bg-hover
+                                ? Theme.accent.with-alpha(0.08)
                                 : (node.path == root.current-path
-                                    ? #4a90e230
-                                    : (mod(i, 2) == 0 ? transparent : #ffffff08));
+                                    ? Theme.accent.with-alpha(0.16)
+                                    : transparent);
 
                             node-ta := TouchArea {
                                 mouse-cursor: pointer;
@@ -915,20 +915,31 @@ export component SftpPanel inherits Rectangle {
                             }
 
                             HorizontalLayout {
-                                spacing: 0;
-                                padding-top: 1px;
+                                spacing: 2px;
 
                                 // Depth indent spacer
                                 Rectangle { width: node.depth * 12px; }
 
-                                // Expand/collapse arrow
+                                // Expand/collapse chevron
                                 Text {
-                                    width: 14px;
+                                    width: 16px;
                                     text: node.has-children
-                                        ? (node.expanded ? "▼" : "▶")
-                                        : " ";
+                                        ? (node.expanded ? "\u{E5CF}" : "\u{E5CC}")
+                                        : "";
+                                    font-family: "Material Icons";
                                     color: Theme.text-muted;
-                                    font-size: 9px;
+                                    font-size: 14px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                // Folder glyph (open / closed)
+                                Text {
+                                    width: 18px;
+                                    text: node.expanded ? "\u{E2C8}" : "\u{E2C7}";
+                                    font-family: "Material Icons";
+                                    color: node.path == root.current-path ? Theme.accent : Theme.text-secondary;
+                                    font-size: 15px;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
                                 }
@@ -1005,10 +1016,11 @@ export component SftpPanel inherits Rectangle {
                                 }
                             }
                             Text {
+                                x: 24px;                       // offset past the checkbox + icon slot
                                 text: @tr("Name") + (root.sort-key == "name" ? (root.sort-dir > 0 ? " ↑" : " ↓") : "");
                                 color: root.sort-key == "name" ? Theme.accent : Theme.text-muted;
                                 font-size: Theme.fs-xs;
-                                width: parent.width;
+                                width: parent.width - 24px;
                                 horizontal-alignment: left;
                                 vertical-alignment: center;
                             }
@@ -1173,14 +1185,14 @@ export component SftpPanel inherits Rectangle {
                             }
 
                             for entry[i] in root.entries : row := Rectangle {
-                                height: 24px;
+                                height: 26px;
                                 background: entry.selected
-                                    ? #4a90e235
+                                    ? Theme.accent.with-alpha(0.20)
                                     : (i == root.selected-row
-                                        ? #4a90e240
+                                        ? Theme.accent.with-alpha(0.13)
                                         : (row-ta.has-hover
-                                            ? #4a90e225
-                                            : (mod(i, 2) == 0 ? transparent : #ffffff08)));
+                                            ? Theme.accent.with-alpha(0.08)
+                                            : transparent));
 
                                 row-ta := TouchArea {
                                     mouse-cursor: pointer;
@@ -1246,7 +1258,7 @@ export component SftpPanel inherits Rectangle {
                                         height: 16px;
                                         border-radius: 3px;
                                         border-width: 1px;
-                                        border-color: entry.selected ? Theme.accent : Theme.border-strong;
+                                        border-color: entry.selected ? Theme.accent : Theme.border-subtle;
                                         background: entry.selected ? Theme.accent : transparent;
                                         cb-ta := TouchArea {
                                             mouse-cursor: pointer;
@@ -1282,17 +1294,26 @@ export component SftpPanel inherits Rectangle {
                                     HorizontalLayout {
                                         horizontal-stretch: 1;
                                         min-width: root.name-min;
-                                        spacing: 4px;
-                                        Text {
-                                            text: entry.is-dir ? "\u{E2C7}" : "\u{E24D}"; // folder / insert_drive_file
-                                            font-family: "Material Icons";
-                                            color: entry.is-dir ? Theme.accent : Theme.text-secondary;
-                                            font-size: Theme.fs-sm;
-                                            vertical-alignment: center;
+                                        spacing: 6px;
+                                        // Fixed 18px glyph slot: at the old 12px the
+                                        // filled folder collapsed into a blob that read
+                                        // like a play button.
+                                        Rectangle {
+                                            width: 18px;
+                                            Text {
+                                                text: entry.is-dir ? "\u{E2C7}" : "\u{E24D}"; // folder / file
+                                                font-family: "Material Icons";
+                                                color: entry.is-dir ? Theme.accent : Theme.text-muted;
+                                                font-size: 17px;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                                width: parent.width;
+                                                height: parent.height;
+                                            }
                                         }
                                         Text {
                                             text: entry.name;
-                                            color: entry.is-dir ? Theme.accent : Theme.text-primary;
+                                            color: Theme.text-primary;
                                             font-size: Theme.fs-sm;
                                             horizontal-stretch: 1;
                                             overflow: elide;
@@ -1493,6 +1514,9 @@ export component SftpPanel inherits Rectangle {
                 tunnel-body := VerticalLayout {
                     padding: 10px;
                     spacing: 8px;
+                    // Keep the form compact; without this the layout spreads the
+                    // panel's slack space between every row.
+                    alignment: start;
 
                     HorizontalLayout {
                         spacing: 6px;
@@ -1500,19 +1524,19 @@ export component SftpPanel inherits Rectangle {
                             width: 54px; height: 24px; border-radius: Theme.radius-sm;
                             background: root.tunnel-kind == "local" ? Theme.accent : (tl-ta.has-hover ? Theme.bg-hover : Theme.bg-root);
                             tl-ta := TouchArea { mouse-cursor: pointer; clicked => { root.tunnel-kind = "local"; } }
-                            Text { text: "-L"; color: root.tunnel-kind == "local" ? #ffffff : Theme.text-primary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "-L"; color: root.tunnel-kind == "local" ? #ffffff : Theme.text-primary; font-size: Theme.fs-sm; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
                         }
                         Rectangle {
                             width: 54px; height: 24px; border-radius: Theme.radius-sm;
                             background: root.tunnel-kind == "dynamic" ? Theme.accent : (td-ta.has-hover ? Theme.bg-hover : Theme.bg-root);
                             td-ta := TouchArea { mouse-cursor: pointer; clicked => { root.tunnel-kind = "dynamic"; } }
-                            Text { text: "-D"; color: root.tunnel-kind == "dynamic" ? #ffffff : Theme.text-primary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "-D"; color: root.tunnel-kind == "dynamic" ? #ffffff : Theme.text-primary; font-size: Theme.fs-sm; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
                         }
                         Rectangle {
                             width: 54px; height: 24px; border-radius: Theme.radius-sm;
                             background: root.tunnel-kind == "remote" ? Theme.accent : (tr-ta.has-hover ? Theme.bg-hover : Theme.bg-root);
                             tr-ta := TouchArea { mouse-cursor: pointer; clicked => { root.tunnel-kind = "remote"; } }
-                            Text { text: "-R"; color: root.tunnel-kind == "remote" ? #ffffff : Theme.text-primary; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "-R"; color: root.tunnel-kind == "remote" ? #ffffff : Theme.text-primary; font-size: Theme.fs-sm; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
                         }
                         Rectangle { horizontal-stretch: 1; }
                         Rectangle {
@@ -1527,6 +1551,36 @@ export component SftpPanel inherits Rectangle {
                                 }
                             }
                             Text { text: @tr("Add"); color: #ffffff; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+
+                    // What the selected mode does, in one sentence (with an example).
+                    // One Text per mode: swapping `text` in place can leave the
+                    // previous line behind in the software renderer's frame.
+                    hint-box := Rectangle {
+                        height: hint-body.preferred-height;
+                        border-radius: Theme.radius-sm;
+                        background: Theme.bg-root;
+                        hint-body := VerticalLayout {
+                            padding: 8px;
+                            if root.tunnel-kind == "local" : Text {
+                                text: @tr("Local forward: open a port on this computer that goes through the server to a target the server can reach. Example: local :1080 → server-side 127.0.0.1:80.");
+                                color: Theme.text-secondary;
+                                font-size: Theme.fs-xs;
+                                wrap: word-wrap;
+                            }
+                            if root.tunnel-kind == "dynamic" : Text {
+                                text: @tr("Dynamic forward (SOCKS5): this computer opens a local SOCKS5 proxy; point apps at it to send traffic through the server.");
+                                color: Theme.text-secondary;
+                                font-size: Theme.fs-xs;
+                                wrap: word-wrap;
+                            }
+                            if root.tunnel-kind == "remote" : Text {
+                                text: @tr("Remote forward: the server opens a port that comes back through SSH to a target this computer can reach. Example: server :9000 → your 127.0.0.1:3000.");
+                                color: Theme.text-secondary;
+                                font-size: Theme.fs-xs;
+                                wrap: word-wrap;
+                            }
                         }
                     }
 
@@ -1589,7 +1643,7 @@ export component SftpPanel inherits Rectangle {
                             width: 16px; height: 16px; border-radius: 3px; border-width: 1px; border-color: Theme.border-subtle;
                             background: root.tunnel-save ? Theme.accent : Theme.bg-root;
                             TouchArea { clicked => { root.tunnel-save = !root.tunnel-save; } }
-                            Text { text: root.tunnel-save ? "X" : ""; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: root.tunnel-save ? "\u{E5CA}" : ""; font-family: "Material Icons"; font-size: 12px; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
                         }
                         Text { text: @tr("Save to this SSH session"); color: Theme.text-secondary; font-size: Theme.fs-xs; }
                     }
@@ -1599,7 +1653,7 @@ export component SftpPanel inherits Rectangle {
                             width: 16px; height: 16px; border-radius: 3px; border-width: 1px; border-color: Theme.border-subtle;
                             background: root.tunnel-auto-start ? Theme.accent : Theme.bg-root;
                             TouchArea { clicked => { root.tunnel-auto-start = !root.tunnel-auto-start; } }
-                            Text { text: root.tunnel-auto-start ? "X" : ""; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: root.tunnel-auto-start ? "\u{E5CA}" : ""; font-family: "Material Icons"; font-size: 12px; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
                         }
                         Text { text: @tr("Start automatically when connecting"); color: Theme.text-secondary; font-size: Theme.fs-xs; }
                     }
@@ -1617,6 +1671,7 @@ export component SftpPanel inherits Rectangle {
                         background: tunnel-row-ta.has-hover ? Theme.bg-hover : Theme.bg-root.with-alpha(0.42);
                         tunnel-row-ta := TouchArea {}
                         HorizontalLayout {
+                            width: 100%;
                             padding-left: 8px; padding-right: 8px; spacing: 8px;
                             Text { text: tun.active ? "●" : "○"; color: tun.active ? #28c76f : Theme.text-muted; width: 14px; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-alignment: center; }
                             Text { text: tun.kind == "dynamic" ? "-D" : (tun.kind == "remote" ? "-R" : "-L"); color: Theme.text-muted; width: 28px; font-size: Theme.fs-sm; vertical-alignment: center; horizontal-alignment: center; }
@@ -1624,14 +1679,26 @@ export component SftpPanel inherits Rectangle {
                             Text { text: tun.bind + (tun.target != "" ? " → " + tun.target : ""); color: Theme.text-secondary; horizontal-stretch: 1; font-size: Theme.fs-xs; overflow: elide; vertical-alignment: center; }
                             Text { text: tun.status; color: tun.active ? Theme.accent : Theme.text-muted; width: 62px; font-size: Theme.fs-xs; overflow: elide; vertical-alignment: center; horizontal-alignment: right; }
                             Rectangle {
-                                width: 48px; height: 22px; border-radius: Theme.radius-sm;
-                                background: control-ta.has-hover ? Theme.bg-hover : transparent;
+                                width: 56px; height: 24px;
+                                y: (parent.height - self.height) / 2;
+                                border-radius: Theme.radius-sm;
+                                border-width: 1px;
+                                border-color: tun.active
+                                    ? (control-ta.has-hover ? Theme.danger : Theme.danger.with-alpha(0.45))
+                                    : (control-ta.has-hover ? Theme.accent : Theme.accent.with-alpha(0.45));
+                                background: control-ta.has-hover
+                                    ? (tun.active ? Theme.danger.with-alpha(0.12) : Theme.accent.with-alpha(0.12))
+                                    : transparent;
                                 control-ta := TouchArea { mouse-cursor: pointer; clicked => { if (tun.active) { root.tunnel-stop(tun.id); } else { root.tunnel-start(tun.id); } } }
                                 Text { text: tun.active ? @tr("Stop") : @tr("Start"); color: tun.active ? Theme.danger : Theme.accent; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
                             }
                             Rectangle {
-                                width: 52px; height: 22px; border-radius: Theme.radius-sm;
-                                background: delete-ta.has-hover ? Theme.danger.with-alpha(0.24) : transparent;
+                                width: 56px; height: 24px;
+                                y: (parent.height - self.height) / 2;
+                                border-radius: Theme.radius-sm;
+                                border-width: 1px;
+                                border-color: delete-ta.has-hover ? Theme.danger : Theme.danger.with-alpha(0.45);
+                                background: delete-ta.has-hover ? Theme.danger.with-alpha(0.12) : transparent;
                                 delete-ta := TouchArea { mouse-cursor: pointer; clicked => { root.tunnel-delete(tun.id); } }
                                 Text { text: @tr("Delete"); color: Theme.danger; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
                             }

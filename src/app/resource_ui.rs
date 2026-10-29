@@ -67,6 +67,7 @@ pub(super) fn proc_rows(procs: &[ProcInfo], current_user: &str, tab_id: &str) ->
             mem: format!("{:.1}", p.mem).into(),
             command: p.command.clone().into(),
             cpu_frac: (p.cpu / 100.0).clamp(0.0, 1.0),
+            mem_frac: (p.mem / 100.0).clamp(0.0, 1.0),
             own_process: !process_needs_root(current_user, &p.user),
         })
         .collect()

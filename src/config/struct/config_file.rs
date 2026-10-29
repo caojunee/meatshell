@@ -283,8 +283,6 @@ pub struct ConfigFile {
     #[serde(default)]
     pub webdav_password: Secret,
     #[serde(default)]
-    pub webdav_remote_path: String,
-    #[serde(default)]
     pub webdav_accept_invalid_certs: bool,
     /// Render the welcome page (session list) as a docked left sidebar instead of
     /// a "New tab" tab (v0.5). Persisted so the layout choice sticks.

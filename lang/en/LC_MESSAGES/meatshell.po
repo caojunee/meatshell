@@ -315,6 +315,12 @@ msgstr "Clear buffer"
 msgid "Find"
 msgstr "Find"
 
+msgid "Replace"
+msgstr "Replace"
+
+msgid "Replace all"
+msgstr "Replace all"
+
 msgid "Processes"
 msgstr "Processes"
 
@@ -411,6 +417,39 @@ msgstr "Target port"
 msgid "Add"
 msgstr "Add"
 
+msgid "Files"
+msgstr "Files"
+
+msgid "Tunnels"
+msgstr "Tunnels"
+
+msgid "No tunnels"
+msgstr "No tunnels"
+
+msgid "Local listen address"
+msgstr "Local listen address"
+
+msgid "Server listen address"
+msgstr "Server listen address"
+
+msgid "Server target host"
+msgstr "Server target host"
+
+msgid "Local target host"
+msgstr "Local target host"
+
+msgid "Save to this SSH session"
+msgstr "Save to this SSH session"
+
+msgid "Start automatically when connecting"
+msgstr "Start automatically when connecting"
+
+msgid "Start"
+msgstr "Start"
+
+msgid "Stop"
+msgstr "Stop"
+
 msgid "-L: local port → target reached from the server"
 msgstr "-L: local port → target reached from the server"
 
@@ -419,6 +458,15 @@ msgstr "-R: server port → target reached from here"
 
 msgid "-D: local SOCKS5 proxy"
 msgstr "-D: local SOCKS5 proxy"
+
+msgid "Local forward: open a port on this computer that goes through the server to a target the server can reach. Example: local :1080 → server-side 127.0.0.1:80."
+msgstr "Local forward: open a port on this computer that goes through the server to a target the server can reach. Example: local :1080 → server-side 127.0.0.1:80."
+
+msgid "Dynamic forward (SOCKS5): this computer opens a local SOCKS5 proxy; point apps at it to send traffic through the server."
+msgstr "Dynamic forward (SOCKS5): this computer opens a local SOCKS5 proxy; point apps at it to send traffic through the server."
+
+msgid "Remote forward: the server opens a port that comes back through SSH to a target this computer can reach. Example: server :9000 → your 127.0.0.1:3000."
+msgstr "Remote forward: the server opens a port that comes back through SSH to a target this computer can reach. Example: server :9000 → your 127.0.0.1:3000."
 
 msgid "meatshell — a lightweight Rust + Slint SSH client by 'lil meatball'"
 msgstr "meatshell — a lightweight Rust + Slint SSH client by 'lil meatball'"

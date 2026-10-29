@@ -223,6 +223,7 @@ impl ConfigStore {
             cache: self.cache.clone(),
             disk_snapshot: std::cell::RefCell::new(self.disk_snapshot.borrow().clone()),
             key: self.key,
+            save_hook: std::cell::RefCell::new(None),
         };
         candidate.cache.sessions.extend(
             sessions

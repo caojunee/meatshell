@@ -17,7 +17,7 @@ import "fonts/MaterialIcons-Regular.ttf";
 import { Theme, ThemePalette } from "theme.slint";
 import { Sidebar, DiskInfo } from "sidebar.slint";
 import { TabBar, TabInfo, LaunchItem } from "tabs.slint";
-import { Welcome, SessionInfo } from "welcome.slint";
+import { Welcome, RecentConnections, SessionInfo } from "welcome.slint";
 import { SessionDialog, SessionDraft, PortFwd, TriggerDraft, JumpHop } from "session_dialog.slint";
 import { ConfirmDialog } from "confirm_dialog.slint";
 import { ModalLayer, ModalKind } from "modal.slint";
@@ -603,6 +603,10 @@ export component AppWindow inherits Window {
     callback open-processes();
     in-out property <bool> process-window-open: false;
     in property <bool> proc-available;       // a live remote session is active
+    // Top processes shown in the resource sidebar (sorted in Rust).
+    in property <[ProcRow]> top-procs;
+    in-out property <string> top-proc-sort: "mem";
+    callback sort-top-procs(string);
     in property <[ProcRow]> proc-list;       // top remote processes by CPU
     callback open-system-info();
     in-out property <bool> system-info-window-open: false;
@@ -729,7 +733,7 @@ export component AppWindow inherits Window {
     // Centred, snapped to whole logical pixels: a half-pixel origin makes the
     // card's text render on subpixel offsets and look blurry (#v0.5).
     property <length> ifd-w: min(root.width - 32px, max(560px, 720px * Theme.panel-font));
-    property <length> ifd-h: min(root.height - 32px, max(320px, 480px * Theme.panel-font));
+    property <length> ifd-h: min(root.height - 32px, max(320px, 620px * Theme.panel-font));
     property <length> ifd-x: round((root.width - root.ifd-w) / 2 / 1px) * 1px;
     property <length> ifd-y: round((root.height - root.ifd-h) / 2 / 1px) * 1px;
     property <bool> ifd-dragging;
@@ -936,15 +940,14 @@ export component AppWindow inherits Window {
     // Mirror SFTP uploads to other sessions while sync-input is on (#sync).
     in-out property <bool> sync-upload-enabled: false;
     callback set-sync-upload-enabled(bool);
-    // WebDAV config sync (#185): manual upload/download of portable session JSON.
+    // WebDAV sync: the configured URL is a folder; the app owns the files in it.
     in-out property <bool> webdav-enabled: false;
     in-out property <string> webdav-url;
     in-out property <string> webdav-username;
     in-out property <string> webdav-password;
-    in-out property <string> webdav-remote-path;
     in-out property <bool> webdav-accept-invalid-certs: false;
     in-out property <string> webdav-status;
-    callback save-webdav-settings(bool, string, string, string, string, bool);
+    callback save-webdav-settings(bool, string, string, string, bool);
     callback webdav-upload();
     callback webdav-download();
     in-out property <length> sftp-panel-height: 220px; // shared; lets Rust locate the drop zone
@@ -1015,6 +1018,8 @@ export component AppWindow inherits Window {
 
     // --- Session list ------------------------------------------------------
     in property <[SessionInfo]> sessions;
+    // Most recently used saved sessions for the empty-pane quick connect card.
+    in property <[SessionInfo]> recent-sessions;
     // New-tab launch menu (#427): local shells and the agent CLIs found here.
     in property <[LaunchItem]> launch-shells;
     in property <[LaunchItem]> agents;
@@ -1887,6 +1892,9 @@ export component AppWindow inherits Window {
                 disks: root.disks;
                 system-info-available: root.system-info-available;
                 proc-available: root.proc-available;
+                top-procs: root.top-procs;
+                top-proc-sort <=> root.top-proc-sort;
+                sort-top-procs(k) => { root.sort-top-procs(k); }
                 app-version: root.app-version;
                 select-net-iface(i) => { root.select-net-iface(i); }
                 show-system-info() => { root.open-system-info(); }
@@ -2027,7 +2035,7 @@ export component AppWindow inherits Window {
                         // Reserve room for the top-right toolbar icons that sit over
                         // this row so tabs don't slide underneath them (#122).
                         reserve-right: pane.reserve-right;
-                        show-new-tab: !root.welcome-as-sidebar;
+                        show-new-tab: true;
                         launch-shells: root.launch-shells;
                         launch-agents: root.agents;
                         can-merge-pane: root.panes.length > 1;
@@ -2090,26 +2098,27 @@ export component AppWindow inherits Window {
                     vertical-stretch: 1;
                     background: Theme.bg-root;
 
-                    // Empty pane outside welcome-sidebar mode: keep a small hint for
-                    // rare empty panes, but do not cover the wallpaper when the
-                    // session list is already visible as a sidebar.
-                    if pane.tabs.length == 0 && !root.welcome-as-sidebar : Rectangle {
+                    // No open tab: show the recent connections (FinalShell-style
+                    // quick connect) instead of a blank pane.
+                    if pane.tabs.length == 0 : RecentConnections {
                         width: parent.width;
                         height: parent.height;
-                        Text {
-                            text: root.lang-en
-                                ? "Pick a session on the left to begin"
-                                : "从左侧选择一个会话开始";
-                            color: Theme.text-muted;
-                            font-size: Theme.fs-sm;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
+                        sessions: root.recent-sessions;
+                        connect(id) => { root.connect-session(id); }
+                    }
+
+                    // Welcome tab in sidebar mode shows the recent connections
+                    // (the session list itself already lives in the left panel).
+                    if pane.active-id == "welcome" && root.welcome-as-sidebar : RecentConnections {
+                        width: parent.width;
+                        height: parent.height;
+                        sessions: root.recent-sessions;
+                        connect(id) => { root.connect-session(id); }
                     }
 
                     // Welcome tab — fill the content area explicitly (some renderers
                     // don't auto-fill, which spread the header/card apart) (#dock).
-                    if pane.active-id == "welcome" : Welcome {
+                    if pane.active-id == "welcome" && !root.welcome-as-sidebar : Welcome {
                         width: parent.width;
                         height: parent.height;
                         sessions: root.sessions;
@@ -2567,6 +2576,9 @@ export component AppWindow inherits Window {
                     disks: root.disks;
                     system-info-available: root.system-info-available;
                     proc-available: root.proc-available;
+                    top-procs: root.top-procs;
+                    top-proc-sort <=> root.top-proc-sort;
+                    sort-top-procs(k) => { root.sort-top-procs(k); }
                     app-version: root.app-version;
                     select-net-iface(i) => { root.select-net-iface(i); }
                     show-system-info() => { root.open-system-info(); }
@@ -5154,7 +5166,6 @@ export component AppWindow inherits Window {
                     webdav-url <=> root.webdav-url;
                     webdav-username <=> root.webdav-username;
                     webdav-password <=> root.webdav-password;
-                    webdav-remote-path <=> root.webdav-remote-path;
                     webdav-accept-invalid-certs <=> root.webdav-accept-invalid-certs;
                     webdav-status <=> root.webdav-status;
                     download-always-ask <=> root.download-always-ask;
@@ -5239,8 +5250,8 @@ export component AppWindow inherits Window {
                     set-collapse-sidebar-default(v) => { root.set-collapse-sidebar-default(v); }
                     set-collapse-sftp-default(v) => { root.set-collapse-sftp-default(v); }
                     set-sync-upload-enabled(v) => { root.set-sync-upload-enabled(v); }
-                    save-webdav-settings(enabled, url, username, password, remote-path, accept-invalid-certs) => {
-                        root.save-webdav-settings(enabled, url, username, password, remote-path, accept-invalid-certs);
+                    save-webdav-settings(enabled, url, username, password, accept-invalid-certs) => {
+                        root.save-webdav-settings(enabled, url, username, password, accept-invalid-certs);
                     }
                     webdav-upload => { root.webdav-upload(); }
                     webdav-download => { root.webdav-download(); }

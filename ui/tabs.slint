@@ -27,6 +27,9 @@ component SingleTab inherits Rectangle {
     // being dragged (#408). Purely visual: its TouchArea is off, so it can never
     // steal the pointer grab from the real tab.
     in property <bool> ghost: false;
+    // The welcome/new-tab page only offers a close button while another tab
+    // exists, so at least one tab always stays open.
+    in property <bool> closeable: false;
     callback selected();
     callback closed();
     callback duplicated();
@@ -121,7 +124,9 @@ component SingleTab inherits Rectangle {
 
     HorizontalLayout {
         padding-left: 10px;
-        padding-right: 4px;
+        // Session tabs end with a 20px close button; the welcome tab has none, so
+        // give it the same visual margin as the left side.
+        padding-right: (info.kind == "welcome" && !root.closeable) || ghost ? 10px : 4px;
         spacing: 8px;
         alignment: start;
 
@@ -146,7 +151,7 @@ component SingleTab inherits Rectangle {
             horizontal-stretch: 0;
         }
 
-        if info.kind != "welcome" && !ghost : Rectangle {
+        if !ghost && (info.kind != "welcome" || root.closeable) : Rectangle {
             width: 20px;
             height: parent.height;
 
@@ -507,6 +512,7 @@ export component TabBar inherits Rectangle {
                         animate x { duration: 120ms; easing: ease-out; }
                         info: tab;
                         active: tab.id == root.active-id;
+                        closeable: root.tabs.length > 1;
                         selected => { root.tab-selected(tab.id); }
                         closed => { root.tab-closed(tab.id); }
                         duplicated => { root.tab-duplicate(tab.id); }

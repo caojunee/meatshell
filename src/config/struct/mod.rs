@@ -1,3 +1,4 @@
+mod backup;
 mod config_file;
 mod config_store;
 mod dock_stack;
@@ -6,6 +7,7 @@ mod secret;
 mod session;
 mod sftp_places;
 
+pub(crate) use backup::*;
 pub(crate) use config_file::*;
 pub(crate) use config_store::*;
 pub(crate) use dock_stack::*;

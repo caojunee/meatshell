@@ -2,6 +2,7 @@ import { Theme, ThemePalette } from "theme.slint";
 import { ModalScope } from "modal.slint";
 import { ConfirmDialog } from "confirm_dialog.slint";
 import { EditorPane, EditorFindResult } from "editor_pane.slint";
+import { AuxWindowChrome } from "aux_window.slint";
 
 // Detached top-level editor window. The editor body itself is the shared
 // EditorPane, which the main window also embeds when the user prefers a
@@ -86,71 +87,25 @@ export component EditorWindow inherits Window {
         width: parent.width;
         height: parent.height;
         focus-on-click: false;
-        VerticalLayout {
-            spacing: 0;
+        AuxWindowChrome {
+            width: parent.width;
+            height: parent.height;
+            title-text: root.editor-name;
+            subtitle: root.editor-language
+                + (root.editor-readonly
+                    ? "  ·  " + @tr("Read-only")
+                    : (root.editor-dirty ? "  ·  " + @tr("Modified") : ""));
+            show-titlebar: root.custom-titlebar;
+            show-grip: root.custom-titlebar;
+            show-save: !root.editor-readonly;
+            dragged => { root.win-drag(); }
+            closed => { root.request-close(); }
+            saved => { root.save-file(); }
+            resize-started => { root.win-resize-se(); }
 
-            if root.custom-titlebar : Rectangle {
-                height: 36px;
-                background: Theme.bg-elevated;
-                title-drag := TouchArea {
-                    pointer-event(e) => {
-                        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
-                            root.win-drag();
-                        }
-                    }
-                }
-                HorizontalLayout {
-                    padding-left: 12px;
-                    spacing: 4px;
-                    Rectangle {
-                        width: 20px;
-                        height: 36px;
-                        Image {
-                            x: 2px;
-                            y: (parent.height - self.height) / 2;
-                            width: 16px;
-                            height: 16px;
-                            source: @image-url("../assets/icon.png");
-                        }
-                    }
-                    Text {
-                        text: root.editor-name + "  ·  " + root.editor-language
-                            + (root.editor-readonly
-                                ? "  ·  " + @tr("Read-only")
-                                : (root.editor-dirty ? "  ·  " + @tr("Modified") : ""));
-                        color: Theme.text-secondary;
-                        font-size: Theme.fs-sm;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    if !root.editor-readonly : Rectangle {
-                        width: 76px;
-                        height: 28px;
-                        y: (parent.height - self.height) / 2;
-                        border-radius: Theme.radius-sm;
-                        background: save-ta.has-hover ? Theme.accent-hover : Theme.accent;
-                        save-ta := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.save-file(); }
-                        }
-                        Text { text: @tr("Save"); color: #ffffff; font-size: Theme.fs-sm;
-                               horizontal-alignment: center; vertical-alignment: center; }
-                    }
-                    Rectangle {
-                        width: 46px; height: 36px;
-                        background: close-ta.has-hover ? #e81123 : transparent;
-                        close-ta := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.request-close(); }
-                        }
-                        Text { text: "\u{E5CD}"; font-family: "Material Icons";
-                               color: close-ta.has-hover ? white : Theme.text-secondary;
-                               font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
-                    }
-                }
-            }
-            Rectangle { height: 1px; background: Theme.border-subtle; }
+        VerticalLayout {
+            vertical-stretch: 1;
+            spacing: 0;
             pane := EditorPane {
                 vertical-stretch: 1;
                 active: root.editor-open;
@@ -175,38 +130,35 @@ export component EditorWindow inherits Window {
                 }
                 editor-replace-all(query, replacement) => { root.editor-replace-all(query, replacement); }
             }
-        }
-        Rectangle {
-            x: parent.width - 18px;
-            y: parent.height - 18px;
-            width: 18px;
-            height: 18px;
-            resize-ta := TouchArea {
-                mouse-cursor: nwse-resize;
-                pointer-event(e) => {
-                    if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
-                        root.win-resize-se();
+
+            // Footer: the full remote path also anchors the bottom window edge.
+            Rectangle {
+                height: 26px;
+                background: Theme.bg-panel-alt;
+
+                Rectangle {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: 1px;
+                    background: Theme.border-subtle;
+                }
+
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 24px;
+                    Text {
+                        text: root.editor-path;
+                        color: Theme.text-muted;
+                        font-size: Theme.fs-xs;
+                        font-family: Theme.font-mono;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        overflow: elide;
                     }
                 }
             }
-            // Draw the resize grip with rectangles instead of a Unicode glyph. The
-            // latter renders as a tofu box on systems without that character.
-            Rectangle {
-                x: 3px; y: 12px; width: 3px; height: 1px;
-                background: resize-ta.has-hover ? Theme.text-secondary : Theme.text-muted;
-            }
-            Rectangle {
-                x: 6px; y: 10px; width: 3px; height: 1px;
-                background: resize-ta.has-hover ? Theme.text-secondary : Theme.text-muted;
-            }
-            Rectangle {
-                x: 9px; y: 8px; width: 3px; height: 1px;
-                background: resize-ta.has-hover ? Theme.text-secondary : Theme.text-muted;
-            }
-            Rectangle {
-                x: 12px; y: 5px; width: 3px; height: 1px;
-                background: resize-ta.has-hover ? Theme.text-secondary : Theme.text-muted;
-            }
+        }
         }
 
         init => { root.editor-focus-pending = true; }

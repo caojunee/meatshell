@@ -21,6 +21,8 @@ pub(super) fn open_document(
     editor.set_editor_dirty(false);
     editor.set_editor_open(true);
     let _ = editor.show();
+    // Frameless editor window: same Win11 corner hint as the main window.
+    super::window::apply_window_chrome(editor.window());
     editor.window().with_winit_window(|ww| ww.focus_window());
 }
 

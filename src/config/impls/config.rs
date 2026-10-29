@@ -567,6 +567,7 @@ impl ConfigStore {
             backup_dir,
             cache,
             key,
+            save_hook: std::cell::RefCell::new(None),
         };
         drop(load_lock);
         // Persist the migration so it runs exactly once (and so a later opt-out —
@@ -1620,14 +1621,6 @@ impl ConfigStore {
         self.cache.webdav_password.as_str()
     }
 
-    pub fn webdav_remote_path(&self) -> &str {
-        if self.cache.webdav_remote_path.trim().is_empty() {
-            "meatshell-connections.json"
-        } else {
-            &self.cache.webdav_remote_path
-        }
-    }
-
     pub fn webdav_accept_invalid_certs(&self) -> bool {
         self.cache.webdav_accept_invalid_certs
     }
@@ -1638,18 +1631,12 @@ impl ConfigStore {
         url: String,
         username: String,
         password: String,
-        remote_path: String,
         accept_invalid_certs: bool,
     ) {
         self.cache.webdav_enabled = enabled;
         self.cache.webdav_url = url.trim().trim_end_matches('/').to_string();
         self.cache.webdav_username = username.trim().to_string();
         self.cache.webdav_password = Secret::new(password);
-        self.cache.webdav_remote_path = if remote_path.trim().is_empty() {
-            "meatshell-connections.json".to_string()
-        } else {
-            remote_path.trim().trim_start_matches('/').to_string()
-        };
         self.cache.webdav_accept_invalid_certs = accept_invalid_certs;
     }
 
@@ -1874,7 +1861,21 @@ impl ConfigStore {
             .with_context(|| format!("failed to finalise {}", self.path.display()))?;
         *self.disk_snapshot.borrow_mut() = Some(raw.clone());
         self.sync_backup(&raw);
+        // WebDAV auto-upload listens here. Clone first: the hook must not observe
+        // this RefCell borrow while it reads the profile.
+        let hook = self.save_hook.borrow().clone();
+        if let Some(hook) = hook {
+            hook(self);
+        }
         Ok(())
+    }
+
+    /// Install the post-save listener used by WebDAV auto-upload.
+    pub fn set_save_hook(
+        &self,
+        hook: Option<std::sync::Arc<dyn Fn(&ConfigStore) + Send + Sync>>,
+    ) {
+        *self.save_hook.borrow_mut() = hook;
     }
 
     fn sync_backup(&self, raw: &str) {
@@ -1967,25 +1968,160 @@ impl ConfigStore {
             sessions: self.cache.sessions.clone(),
         };
         for s in &mut out.sessions {
-            // `cache` holds plaintext passwords; obfuscate with the export key.
-            if !s.password.is_empty() {
-                let enc = Self::encrypt_export(s.password.as_str())?;
-                s.password = Secret::new(enc);
-            }
-            if !s.private_key_inline.is_empty() {
-                let enc = Self::encrypt_export(s.private_key_inline.as_str())?;
-                s.private_key_inline = Secret::new(enc);
-            }
-            for trigger in &mut s.triggers {
-                if !trigger.response.is_empty() {
-                    let enc = Self::encrypt_export(trigger.response.as_str())?;
-                    trigger.response = Secret::new(enc);
-                }
-            }
-            // `last_used` is machine-local noise — don't carry it across.
-            s.last_used = None;
+            Self::encrypt_session_for_export(s)?;
         }
         Ok((serde_json::to_string_pretty(&out)?, out.sessions.len()))
+    }
+
+    /// Re-encrypt a session's credentials with the portable export key and drop
+    /// machine-local noise. Shared by the session export and the full backup.
+    fn encrypt_session_for_export(session: &mut Session) -> Result<()> {
+        if !session.password.is_empty() {
+            let enc = Self::encrypt_export(session.password.as_str())?;
+            session.password = Secret::new(enc);
+        }
+        if !session.private_key_inline.is_empty() {
+            let enc = Self::encrypt_export(session.private_key_inline.as_str())?;
+            session.private_key_inline = Secret::new(enc);
+        }
+        for trigger in &mut session.triggers {
+            if !trigger.response.is_empty() {
+                let enc = Self::encrypt_export(trigger.response.as_str())?;
+                trigger.response = Secret::new(enc);
+            }
+        }
+        // `last_used` is machine-local noise — don't carry it across.
+        session.last_used = None;
+        Ok(())
+    }
+
+    /// Full-profile backup for WebDAV sync: every setting plus sessions and
+    /// quick commands. Session secrets are re-encrypted with the portable
+    /// export key; the WebDAV password itself is never included.
+    pub fn export_backup_json(&self, updated_at: u64, device_id: &str) -> Result<(String, usize)> {
+        let mut config = self.cache.clone();
+        for session in &mut config.sessions {
+            Self::encrypt_session_for_export(session)?;
+        }
+        config.webdav_password = Secret::new("");
+        let count = config.sessions.len();
+        let backup = BackupFile {
+            meatshell_backup: 2,
+            updated_at,
+            device_id: device_id.to_string(),
+            config,
+        };
+        Ok((serde_json::to_string_pretty(&backup)?, count))
+    }
+
+    /// Restore a full-profile backup (v2) or a legacy sessions-only export (v1).
+    /// v2 replaces the whole profile; this device's WebDAV settings are kept so
+    /// a download can never rewire the sync target. The previous profile is
+    /// snapshotted beside sessions.json before it is replaced.
+    pub fn import_backup_json(&mut self, raw: &str) -> Result<BackupImport> {
+        let value: serde_json::Value = serde_json::from_str(raw)
+            .map_err(|_| anyhow::anyhow!("invalid backup JSON"))?;
+        if value.get("meatshell_backup").is_none() {
+            let (added, skipped) = self.import_json(raw)?;
+            return Ok(BackupImport {
+                added,
+                skipped,
+                quick_commands: 0,
+                settings: false,
+            });
+        }
+        let mut backup: BackupFile =
+            serde_json::from_value(value).map_err(|_| anyhow::anyhow!("invalid backup fields"))?;
+        if backup.meatshell_backup != 2 {
+            anyhow::bail!("unsupported backup version; expected version 2");
+        }
+        for (index, session) in backup.config.sessions.iter_mut().enumerate() {
+            self.decode_backup_secret(&mut session.password, index, "password")?;
+            self.decode_backup_secret(&mut session.private_key_inline, index, "private key")?;
+            for trigger in &mut session.triggers {
+                self.decode_backup_secret(&mut trigger.response, index, "trigger response")?;
+            }
+        }
+        self.snapshot_before_import()?;
+        let (enabled, url, username, password, insecure) = (
+            self.webdav_enabled(),
+            self.webdav_url().to_string(),
+            self.webdav_username().to_string(),
+            self.webdav_password().to_string(),
+            self.webdav_accept_invalid_certs(),
+        );
+        let quick_commands = backup.config.quick_commands.len();
+        self.cache = backup.config;
+        self.set_webdav_settings(enabled, url, username, password, insecure);
+        self.save()?;
+        Ok(BackupImport {
+            added: self.cache.sessions.len(),
+            skipped: 0,
+            quick_commands,
+            settings: true,
+        })
+    }
+
+    fn decode_backup_secret(&self, secret: &mut Secret, index: usize, field: &str) -> Result<()> {
+        let value = secret.as_str();
+        let decoded = if value.starts_with(Self::EXPORT_PREFIX) {
+            Some(Self::decrypt_export(value))
+        } else if value.starts_with(Self::ENC_PREFIX) {
+            Some(Self::try_decrypt(&self.key, value))
+        } else {
+            None
+        };
+        if let Some(decoded) = decoded {
+            let plaintext = decoded.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "cannot decrypt {field} in backup entry {}; the backup was written with a different key",
+                    index + 1
+                )
+            })?;
+            *secret = Secret::new(plaintext);
+        }
+        Ok(())
+    }
+
+    /// Copy sessions.json aside before a remote profile replaces it. Keeps the
+    /// five most recent snapshots next to the live file.
+    fn snapshot_before_import(&self) -> Result<()> {
+        if !self.path.exists() {
+            return Ok(());
+        }
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let snapshot = self.path.with_extension(format!("json.sync-bak-{ts}"));
+        fs::copy(&self.path, &snapshot)
+            .with_context(|| format!("failed to snapshot {}", self.path.display()))?;
+        if let Some(dir) = self.path.parent() {
+            let prefix = self
+                .path
+                .with_extension("json.sync-bak-")
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let mut old: Vec<_> = fs::read_dir(dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.file_name()
+                        .is_some_and(|n| n.to_string_lossy().starts_with(&prefix))
+                })
+                .collect();
+            old.sort();
+            while old.len() > 5 {
+                if let Some(p) = old.first().cloned() {
+                    let _ = fs::remove_file(p);
+                    old.remove(0);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Export all sessions to a portable JSON file. Passwords are re-encrypted
@@ -2019,6 +2155,7 @@ mod tests {
             disk_snapshot: std::cell::RefCell::new(None),
             cache: ConfigFile::default(),
             key: [7u8; 32],
+            save_hook: std::cell::RefCell::new(None),
         }
     }
 
@@ -2410,6 +2547,7 @@ mod tests {
                 ..ConfigFile::default()
             },
             key: [7u8; 32],
+            save_hook: std::cell::RefCell::new(None),
         };
         std::fs::write(primary.join("secret.key"), [7u8; 32]).unwrap();
         store.save().unwrap();
@@ -2570,6 +2708,66 @@ mod tests {
         assert_eq!(b.import_from(&export_path).unwrap(), (0, 1));
 
         let _ = std::fs::remove_file(&export_path);
+        let _ = std::fs::remove_file(&a.path);
+        let _ = std::fs::remove_file(&b.path);
+    }
+
+    #[test]
+    fn backup_roundtrip_restores_profile_and_keeps_local_webdav() {
+        let mut a = temp_store();
+        a.cache.sessions.push(Session {
+            name: "pve".into(),
+            host: "192.168.100.2".into(),
+            port: 22,
+            user: "root".into(),
+            password: Secret::new("s3cr3t"),
+            ..Session::new_empty()
+        });
+        a.cache.quick_commands.push(QuickCommand {
+            name: "disk".into(),
+            command: "df -h".into(),
+            group: "ops".into(),
+            send_enter: true,
+        });
+        a.cache.terminal_cursor_style = "bar".into();
+        a.set_webdav_settings(
+            true,
+            "https://nas/all/".into(),
+            "u".into(),
+            "serverpass".into(),
+            false,
+        );
+
+        let (raw, count) = a.export_backup_json(42, "device-a").unwrap();
+        assert_eq!(count, 1);
+        assert!(raw.contains("meatshell_backup"));
+        assert!(raw.contains("device-a"));
+        assert!(
+            !raw.contains("serverpass"),
+            "the WebDAV password must never be part of the uploaded backup"
+        );
+
+        let mut b = temp_store();
+        b.set_webdav_settings(
+            true,
+            "https://other/all/".into(),
+            "local".into(),
+            "localpass".into(),
+            false,
+        );
+        let local_url = b.webdav_url().to_string();
+        let summary = b.import_backup_json(&raw).unwrap();
+        assert!(summary.settings);
+        assert_eq!(summary.added, 1);
+        assert_eq!(summary.quick_commands, 1);
+        // The profile came over, including re-encrypted credentials…
+        assert_eq!(b.cache.sessions[0].password.as_str(), "s3cr3t");
+        assert_eq!(b.cache.terminal_cursor_style, "bar");
+        assert_eq!(b.cache.quick_commands[0].command, "df -h");
+        // …while this device keeps its own WebDAV endpoint and credentials.
+        assert_eq!(b.webdav_url(), local_url);
+        assert_eq!(b.webdav_password(), "localpass");
+
         let _ = std::fs::remove_file(&a.path);
         let _ = std::fs::remove_file(&b.path);
     }
@@ -2783,6 +2981,7 @@ mod profile_safety_tests {
             path: dir.join("sessions.json"), backup_dir: None,
             cache: ConfigFile::default(), key: [1; 32],
             disk_snapshot: std::cell::RefCell::new(None),
+            save_hook: std::cell::RefCell::new(None),
         };
         current.cache.sessions.push(Session::new_empty());
         current.save().unwrap();
@@ -2790,6 +2989,7 @@ mod profile_safety_tests {
             path: current.path.clone(), backup_dir: None,
             cache: current.cache.clone(), key: current.key,
             disk_snapshot: std::cell::RefCell::new(current.disk_snapshot.borrow().clone()),
+            save_hook: std::cell::RefCell::new(None),
         };
         current.cache.sessions.push(Session::new_empty());
         current.save().unwrap();

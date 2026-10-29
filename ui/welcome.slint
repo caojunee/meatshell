@@ -56,7 +56,7 @@ component SessionRow inherits Rectangle {
     property <bool> grab-dragging: false;
     property <length> grab-y;
 
-    height: root.compact ? 44px : 36px;
+    height: root.compact ? 46px : 38px;
 
     // Remember where the right-click landed so the popup can appear there.
     property <length> ctx-x;
@@ -261,20 +261,24 @@ component SessionRow inherits Rectangle {
         animate drop-shadow-blur { duration: 120ms; }
 
     HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        spacing: root.compact ? 8px : 12px;
+        padding-left: root.compact ? 14px : 10px;
+        padding-right: root.compact ? 8px : 10px;
+        spacing: root.compact ? 10px : 12px;
 
         Rectangle {
-            width: 18px; height: 18px;
+            width: root.compact ? 24px : 22px;
+            height: root.compact ? 24px : 22px;
             y: (parent.height - self.height) / 2;
-            border-radius: 3px;
-            background: Theme.bg-elevated;
+            border-radius: 5px;
+            background: root.drag-target ? Theme.accent.with-alpha(0.26)
+                : touch.has-hover ? Theme.accent.with-alpha(0.16)
+                : Theme.bg-elevated;
+            animate background { duration: 120ms; }
             Text {
                 text: root.system-row ? "\u{E30A}" : "\u{E875}";   // terminal / server
                 font-family: "Material Icons";
-                color: Theme.text-secondary;
-                font-size: Theme.fs-sm;
+                color: touch.has-hover || root.drag-target ? Theme.accent : Theme.text-secondary;
+                font-size: root.compact ? 15px : 14px;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -283,11 +287,12 @@ component SessionRow inherits Rectangle {
         if root.compact : VerticalLayout {
             horizontal-stretch: 1;
             alignment: center;
-            spacing: 1px;
+            spacing: 2px;
             Text {
                 text: session.name;
                 color: Theme.text-primary;
-                font-size: Theme.fs-sm;
+                font-size: Theme.fs-md;
+                font-weight: 500;
                 overflow: elide;
             }
             Text {
@@ -346,6 +351,124 @@ component CollapseButton inherits Rectangle {
         font-size: 16px;
         horizontal-alignment: center;
         vertical-alignment: center;
+    }
+}
+
+// --- RecentConnections -----------------------------------------------------
+// FinalShell-style quick connect card shown when no tab is open: the ten most
+// recently used saved sessions, one click away.
+export component RecentConnections inherits Rectangle {
+    in property <[SessionInfo]> sessions;
+    callback connect(string);
+
+    background: Theme.bg-root;
+
+    card := Rectangle {
+        width: min(parent.width - 80px, 720px);
+        height: card-body.preferred-height;
+        x: (parent.width - self.width) / 2;
+        y: max(36px, (parent.height - self.height) / 3);
+        background: Theme.bg-panel;
+        border-radius: Theme.radius-lg;
+        border-width: 1px;
+        border-color: Theme.border-subtle;
+        clip: true;
+
+        card-body := VerticalLayout {
+            spacing: 0;
+
+            Rectangle {
+                height: 44px;
+                background: Theme.bg-panel-alt;
+                HorizontalLayout {
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    Text {
+                        text: @tr("Quick connect");
+                        color: Theme.text-primary;
+                        font-size: Theme.fs-md;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: @tr("Recent");
+                        color: Theme.text-muted;
+                        font-size: Theme.fs-xs;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.border-subtle; }
+
+            if root.sessions.length == 0 : Rectangle {
+                height: 88px;
+                Text {
+                    text: @tr("No sessions yet");
+                    color: Theme.text-muted;
+                    font-size: Theme.fs-sm;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            for s in root.sessions : Rectangle {
+                height: 36px;
+                background: row-hit.has-hover ? Theme.bg-hover : transparent;
+
+                HorizontalLayout {
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    spacing: 10px;
+
+                    Rectangle {
+                        width: 18px;
+                        height: 18px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 3px;
+                        background: Theme.bg-elevated;
+                        Text {
+                            text: "\u{E875}";   // server
+                            font-family: "Material Icons";
+                            color: Theme.text-secondary;
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Text {
+                        text: s.name;
+                        color: Theme.text-primary;
+                        font-size: Theme.fs-sm;
+                        width: 220px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: "/" + s.group;
+                        color: Theme.text-muted;
+                        font-size: Theme.fs-xs;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: s.user;
+                        color: Theme.text-secondary;
+                        font-size: Theme.fs-xs;
+                        width: 100px;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+
+                row-hit := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.connect(s.id); }
+                }
+            }
+        }
     }
 }
 
@@ -471,8 +594,8 @@ export component Welcome inherits Rectangle {
             border-color: Theme.border-subtle;
 
             VerticalLayout {
-                padding: 16px;
-                spacing: 12px;
+                padding: root.compact ? 12px : 16px;
+                spacing: root.compact ? 10px : 12px;
 
                 Rectangle {
                     height: header-row.preferred-height;
@@ -526,27 +649,29 @@ export component Welcome inherits Rectangle {
                 }
                 if root.compact : PrimaryButton {
                     text: @tr("+ New session");
+                    height: 34px;
+                    border-radius: Theme.radius-md;
                     clicked => { root.new-session(); }
                 }
 
                 // Filter saved and built-in sessions by display name or host.
                 Rectangle {
-                    height: 32px;
-                    border-radius: Theme.radius-sm;
+                    height: 34px;
+                    border-radius: Theme.radius-md;
                     border-width: 1px;
                     border-color: search-input.has-focus ? Theme.accent : Theme.border-subtle;
                     background: Theme.bg-root;
 
                     HorizontalLayout {
-                        padding-left: 8px;
+                        padding-left: 9px;
                         padding-right: 4px;
                         spacing: 6px;
 
                         Text {
                             text: "\u{E8B6}";
                             font-family: "Material Icons";
-                            color: Theme.text-muted;
-                            font-size: Theme.fs-sm;
+                            color: search-input.has-focus ? Theme.accent : Theme.text-muted;
+                            font-size: 15px;
                             vertical-alignment: center;
                         }
 
@@ -559,7 +684,7 @@ export component Welcome inherits Rectangle {
                                 text <=> root.search-query;
                                 color: Theme.text-primary;
                                 font-family: Theme.ui-font-family;
-                                font-size: Theme.fs-sm;
+                                font-size: Theme.fs-md;
                                 vertical-alignment: center;
                                 single-line: true;
                                 edited => { root.search-changed(root.search-query); }
@@ -570,7 +695,7 @@ export component Welcome inherits Rectangle {
                                 height: parent.height;
                                 text: @tr("Search by name or host...");
                                 color: Theme.text-muted;
-                                font-size: Theme.fs-sm;
+                                font-size: Theme.fs-md;
                                 horizontal-alignment: left;
                                 vertical-alignment: center;
                             }
@@ -670,47 +795,53 @@ export component Welcome inherits Rectangle {
                         // Exclude hidden rows from layout spacing while a group
                         // is collapsed; keep its first row for the group header.
                         visible: session.group-header != "" || !session.collapsed;
-                        padding-top: self.visible && i > 0 ? 2px : 0px;
+                        // Extra breathing room before each following group.
+                        padding-top: !self.visible ? 0px
+                            : session.group-header != "" && i > 0 ? 10px
+                            : i > 0 ? 2px : 0px;
                         spacing: 2px;
                         // Group header on the first row of each group (#41).
                         // Click anywhere on it to collapse / expand the group.
                         if session.group-header != "" : Rectangle {
-                            height: 26px;
+                            height: 28px;
+                            border-radius: Theme.radius-sm;
+                            background: gh-ta.has-hover ? Theme.bg-hover : transparent;
+                            animate background { duration: 120ms; }
                             // Right-click popup anchor.
                             property <length> gmx;
                             property <length> gmy;
                             HorizontalLayout {
-                                padding-top: 6px;
-                                padding-left: 4px;
-                                spacing: 4px;
+                                padding-left: 6px;
+                                padding-right: 8px;
+                                spacing: 6px;
                                 // Collapse chevron — shown for every group, empty
                                 // folders included, so they line up and can be
                                 // toggled (an empty group just expands to nothing).
                                 Text {
                                     text: session.collapsed ? "\u{E5CC}" : "\u{E5CF}";
                                     font-family: "Material Icons";
-                                    color: Theme.text-muted;
-                                    font-size: Theme.fs-sm;
+                                    color: Theme.text-secondary;
+                                    font-size: 15px;
                                     vertical-alignment: center;
                                 }
                                 Text {
                                     text: "\u{E2C7}";   // folder glyph
                                     font-family: "Material Icons";
-                                    color: Theme.text-muted;
-                                    font-size: Theme.fs-sm;
+                                    color: Theme.accent;
+                                    font-size: 15px;
                                     vertical-alignment: center;
                                 }
                                 Text {
                                     text: session.group-header;
-                                    color: Theme.text-muted;
-                                    font-size: Theme.fs-xs;
+                                    color: gh-ta.has-hover ? Theme.text-primary : Theme.text-secondary;
+                                    font-size: Theme.fs-md;
                                     font-weight: 700;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;       // fill → text stays left
                                     horizontal-alignment: left;
                                 }
                             }
-                            TouchArea {
+                            gh-ta := TouchArea {
                                 mouse-cursor: pointer;
                                 // Left-click toggles collapse (any group, incl.
                                 // empty); right-click opens the group menu.

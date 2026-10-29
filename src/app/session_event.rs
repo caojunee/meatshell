@@ -325,6 +325,9 @@ pub(super) fn apply_session_event_to_window(
                         !edit,
                     );
                 } else {
+                    // Theme is a per-window Slint global; copy it before showing
+                    // the detached editor or it opens with dark defaults.
+                    super::resource_ui::sync_editor_theme(win, editor);
                     open_document(editor, tab_id, path, name, content, edit);
                 }
             } else {

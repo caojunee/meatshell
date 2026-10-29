@@ -1,5 +1,6 @@
 import { Theme } from "theme.slint";
 import { Sparkline } from "widgets.slint";
+import { ProcRow } from "proc_window.slint";
 
 // One filesystem row for the disk-usage panel.
 export struct DiskInfo {
@@ -9,63 +10,66 @@ export struct DiskInfo {
 }
 
 // --- StatRow ---------------------------------------------------------------
-// A single label / percentage / progress-bar row used for CPU / memory / swap.
-component StatRow inherits HorizontalLayout {
+// One resource metric: label + percentage + used/total on the first line, a
+// slim bar underneath. Keeping the numbers out of the bar keeps both legible
+// and lets the bar use the full width.
+component StatRow inherits VerticalLayout {
     in property <string> label;
     in property <float> percent; // 0.0 .. 1.0
-    in property <string> detail;
+    in property <string> detail; // "used/total"; empty hides it
     in property <brush> bar-color: Theme.accent;
 
-    spacing: 6px;
-    padding-left: 8px;
-    padding-right: 8px;
-    height: 22px;
+    padding-left: 4px;
+    padding-right: 4px;
+    spacing: 4px;
+    // Keep the row at its natural height; otherwise the toolbar's stretch
+    // distributes slack space inside the row and pushes the bar away.
+    vertical-stretch: 0;
 
-    Text {
-        text: label;
-        color: Theme.text-secondary;
-        font-size: Theme.fs-sm;
-        width: 52px;          // fits English "Memory" as well as 中文 "内存"
-        vertical-alignment: center;
-        overflow: elide;
+    HorizontalLayout {
+        spacing: 8px;
+
+        Text {
+            text: label;
+            color: Theme.text-secondary;
+            font-size: Theme.fs-sm;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        Text {
+            text: Math.round(percent * 100) + "%";
+            color: Theme.text-primary;
+            font-size: Theme.fs-sm;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+
+        Rectangle { horizontal-stretch: 1; } // spacer: detail hugs the right
+
+        Text {
+            text: detail;
+            color: Theme.text-muted;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+        }
     }
 
-    // Progress bar — stretches to fill the row, with a floor so it stays usable.
     Rectangle {
-        background: Theme.bg-root;
+        height: 8px;
         border-radius: 2px;
-        horizontal-stretch: 2;
-        min-width: 60px;
+        background: Theme.bg-root;
 
         Rectangle {
+            height: parent.height;
             x: 0;
             y: 0;
-            height: parent.height;
             width: parent.width * clamp(percent, 0.0, 1.0);
             background: bar-color;
             border-radius: 2px;
             animate width { duration: 500ms; easing: ease-out; }
         }
-
-        Text {
-            x: 6px;
-            text: Math.round(percent * 100) + "%";
-            color: Theme.text-primary;
-            font-size: Theme.fs-xs;
-            vertical-alignment: center;
-            height: parent.height;
-        }
-    }
-
-    // Used/total figure, right-aligned; reserve width so it never gets clipped.
-    Text {
-        text: detail;
-        color: Theme.text-muted;
-        font-size: Theme.fs-xs;
-        horizontal-stretch: 1;
-        min-width: 64px;
-        horizontal-alignment: right;
-        vertical-alignment: center;
     }
 }
 
@@ -291,6 +295,108 @@ component StatusBlock inherits Rectangle {
     }
 }
 
+// A numeric cell with a subtle in-cell load bar (used by the mini process
+// table below the resource stats).
+component ProcCell inherits Rectangle {
+    in property <string> text;
+    in property <float> frac;
+    in property <brush> tint;
+
+    height: 16px;
+    border-radius: 3px;
+    background: Theme.bg-root;
+
+    Rectangle {
+        x: 0;
+        y: 0;
+        height: parent.height;
+        width: parent.width * clamp(frac, 0.0, 1.0);
+        background: tint.with-alpha(0.35);
+        border-radius: 3px;
+    }
+    Text {
+        x: 5px;
+        text: root.text;
+        color: Theme.text-primary;
+        font-size: 10px;
+        vertical-alignment: center;
+        height: parent.height;
+    }
+}
+
+// Top processes: click the Memory / CPU header to sort (largest first).
+component TopProcBlock inherits VerticalLayout {
+    in property <[ProcRow]> rows;
+    in property <string> sort-key: "mem";
+    callback sort(string);
+
+    spacing: 3px;
+
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        spacing: 6px;
+
+        Rectangle {
+            width: 58px;
+            mem-head-ta := TouchArea { mouse-cursor: pointer; clicked => { root.sort("mem"); } }
+            Text {
+                text: @tr("Memory") + (root.sort-key == "mem" ? "  ↓" : "");
+                color: root.sort-key == "mem" ? Theme.accent : Theme.text-muted;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+        Rectangle {
+            width: 46px;
+            cpu-head-ta := TouchArea { mouse-cursor: pointer; clicked => { root.sort("cpu"); } }
+            Text {
+                text: "CPU" + (root.sort-key == "cpu" ? "  ↓" : "");
+                color: root.sort-key == "cpu" ? Theme.accent : Theme.text-muted;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+            }
+        }
+        Text {
+            text: @tr("Command");
+            color: Theme.text-muted;
+            font-size: Theme.fs-xs;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+        }
+    }
+
+    for p in root.rows : Rectangle {
+        height: 18px;
+        HorizontalLayout {
+            padding-left: 4px;
+            padding-right: 4px;
+            spacing: 6px;
+            ProcCell {
+                width: 58px;
+                text: p.mem + "%";
+                frac: p.mem-frac;
+                tint: Theme.accent;
+            }
+            ProcCell {
+                width: 46px;
+                text: p.cpu;
+                frac: p.cpu-frac;
+                tint: p.cpu-frac > 0.5 ? Theme.warning : Theme.success;
+            }
+            Text {
+                text: p.command;
+                color: Theme.text-secondary;
+                font-size: Theme.fs-xs;
+                horizontal-stretch: 1;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
 // Resource title + Processes button + CPU/Memory/Swap rows.
 component StatsBlock inherits VerticalLayout {
     in property <string> resource-title;
@@ -303,11 +409,13 @@ component StatsBlock inherits VerticalLayout {
     in property <string> swap-detail;
     callback show-system-info();
     callback show-processes();
-    spacing: 6px;
+    // Natural height only — the disk list below takes the panel's slack space.
+    vertical-stretch: 0;
+    spacing: 8px;
     HorizontalLayout {
         spacing: 6px;
         Rectangle {
-            height: 20px;
+            height: 24px;
             horizontal-stretch: 1;
             border-radius: Theme.radius-sm;
             background: root.system-info-available && sys-ta.has-hover ? Theme.bg-hover : transparent;
@@ -320,30 +428,33 @@ component StatsBlock inherits VerticalLayout {
                 x: 4px;
                 width: parent.width - 8px;
                 text: root.resource-title;
-                color: Theme.text-secondary;
-                font-size: Theme.fs-sm;
+                color: Theme.text-primary;
+                font-size: Theme.fs-md;
+                font-weight: 600;
                 vertical-alignment: center;
                 overflow: elide;
             }
         }
         if root.system-info-available : Rectangle {
-            width: 22px; height: 20px;
+            width: 22px; height: 22px;
             border-radius: Theme.radius-sm;
             background: info-ta.has-hover ? Theme.bg-hover : transparent;
             info-ta := TouchArea { mouse-cursor: pointer; clicked => { root.show-system-info(); } }
             Text {
                 text: "\u{E88E}";
                 font-family: "Material Icons";
-                color: Theme.text-secondary;
-                font-size: Theme.fs-sm;
+                color: info-ta.has-hover ? Theme.text-primary : Theme.text-muted;
+                font-size: 15px;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
         }
         if root.proc-available : Rectangle {
-            width: 52px; height: 20px;
+            width: 54px; height: 22px;
             border-radius: Theme.radius-sm;
-            background: proc-ta.has-hover ? Theme.bg-hover : Theme.bg-elevated;
+            border-width: 1px;
+            border-color: proc-ta.has-hover ? Theme.border-strong : Theme.border-subtle;
+            background: proc-ta.has-hover ? Theme.bg-hover : transparent;
             proc-ta := TouchArea { mouse-cursor: pointer; clicked => { root.show-processes(); } }
             Text { text: @tr("Processes"); color: Theme.text-secondary; font-size: Theme.fs-xs;
                    horizontal-alignment: center; vertical-alignment: center; }
@@ -461,6 +572,9 @@ export component Sidebar inherits Rectangle {
     in property <bool> net-show-selector;
     in property <[DiskInfo]> disks;
     in property <bool> proc-available;   // a live remote session → show the process button (#23)
+    in property <[ProcRow]> top-procs;
+    in-out property <string> top-proc-sort: "mem";
+    callback sort-top-procs(string);
     // App version string, injected from Rust (env!("CARGO_PKG_VERSION")) so it
     // always matches Cargo.toml without hand-editing this file.
     in property <string> app-version;
@@ -544,6 +658,12 @@ export component Sidebar inherits Rectangle {
                 show-processes() => { root.show-processes(); }
             }
             Rectangle { height: 1px; background: Theme.border-subtle; }
+            if root.top-procs.length > 0 : TopProcBlock {
+                rows: root.top-procs;
+                sort-key: root.top-proc-sort;
+                sort(k) => { root.sort-top-procs(k); }
+            }
+            if root.top-procs.length > 0 : Rectangle { height: 1px; background: Theme.border-subtle; }
             NetBlock {
                 net-top-up: root.net-top-up; net-top-down: root.net-top-down; net-top-history: root.net-top-history;
                 net-show-selector: root.net-show-selector; net-ifaces: root.net-ifaces; net-selected: root.net-selected;
@@ -601,6 +721,14 @@ export component Sidebar inherits Rectangle {
                 }
             }
             Rectangle { width: 1px; background: Theme.border-subtle; }
+            if root.top-procs.length > 0 : TopProcBlock {
+                min-width: 210px;
+                vertical-stretch: 0;
+                rows: root.top-procs;
+                sort-key: root.top-proc-sort;
+                sort(k) => { root.sort-top-procs(k); }
+            }
+            if root.top-procs.length > 0 : Rectangle { width: 1px; background: Theme.border-subtle; }
             NetBlock {
                 min-width: 220px;
                 net-top-up: root.net-top-up; net-top-down: root.net-top-down; net-top-history: root.net-top-history;

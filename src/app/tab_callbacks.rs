@@ -135,6 +135,28 @@ pub(super) fn wire_tab_callbacks(
         window.on_pane_tab_closed(move |_pane_id: i32, id: SharedString| {
             let id = id.to_string();
             if id == "welcome" {
+                // The new-tab page is closable only while another tab shares its
+                // pane; it never removes the last tab.
+                let mut lay = layout.borrow_mut();
+                let closable = lay
+                    .leaf_of_tab("welcome")
+                    .and_then(|owner| lay.leaf(owner))
+                    .is_some_and(|leaf| leaf.tabs.len() > 1);
+                if !closable {
+                    return;
+                }
+                lay.remove_tab("welcome");
+                drop(lay);
+                if let Some(w) = weak.upgrade() {
+                    refresh_panes(
+                        &w,
+                        &layout.borrow(),
+                        content_size.get(),
+                        &tabs_model,
+                        &panes_model,
+                        &splitters_model,
+                    );
+                }
                 return;
             }
             // Editor tab with unsaved edits (#494): ask first; "Discard and
@@ -223,15 +245,8 @@ pub(super) fn wire_tab_callbacks(
         let panes_model = panes_model.clone();
         let splitters_model = splitters_model.clone();
         window.on_pane_new_tab(move |pane_id: i32| {
-            // In welcome-as-sidebar mode there is no welcome tab — the session list
-            // lives in the left panel, so "+" has nothing to open.
-            if weak
-                .upgrade()
-                .map(|w| w.get_welcome_as_sidebar())
-                .unwrap_or(false)
-            {
-                return;
-            }
+            // "+" opens (or focuses) the welcome tab. In welcome-as-sidebar mode
+            // that tab renders the recent-connections page.
             {
                 let mut lay = layout.borrow_mut();
                 if let Some(owner) = lay.leaf_of_tab("welcome") {

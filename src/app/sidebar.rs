@@ -96,15 +96,64 @@ pub(super) fn refresh_sidebar(
     // remote session has process data; default to empty and let the connected
     // branch below fill it in.
     let set_procs = |win: &AppWindow, procs: &[ProcInfo], current_user: &str, tab_id: &str| {
-        if !win.get_process_window_open() {
-            return;
+        let rows = proc_rows(procs, current_user, tab_id);
+        // The detached process window shares one model; only feed it while
+        // visible so a closed window costs nothing.
+        if win.get_process_window_open() {
+            if let Some(vm) = win
+                .get_proc_list()
+                .as_any()
+                .downcast_ref::<VecModel<ProcRow>>()
+            {
+                vm.set_vec(rows.clone());
+            }
         }
+        // Sidebar mini table: top 6, sorted by the header the user clicked.
         if let Some(vm) = win
-            .get_proc_list()
+            .get_top_procs()
             .as_any()
             .downcast_ref::<VecModel<ProcRow>>()
         {
-            vm.set_vec(proc_rows(procs, current_user, tab_id));
+            let mut top = rows;
+            if win.get_top_proc_sort().as_str() == "cpu" {
+                top.sort_by(|a, b| {
+                    b.cpu_frac
+                        .partial_cmp(&a.cpu_frac)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            } else {
+                top.sort_by(|a, b| {
+                    b.mem_frac
+                        .partial_cmp(&a.mem_frac)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+            top.truncate(4);
+            // The mini table mirrors top's COMMAND column: the executable name
+            // only, not the full argument list (the process window keeps args).
+            for row in &mut top {
+                let command = row.command.as_str();
+                let first = command.split_whitespace().next().unwrap_or("");
+                let short = first.rsplit('/').next().unwrap_or(first);
+                row.command = short.into();
+            }
+            // Bars scale to the largest entry in the list: percentages of total
+            // RAM/CPU are all tiny in a short top-N table and read as noise.
+            let max_mem = top.iter().map(|r| r.mem_frac).fold(0.0_f32, f32::max);
+            let max_cpu = top.iter().map(|r| r.cpu_frac).fold(0.0_f32, f32::max);
+            for row in &mut top {
+                row.mem_frac = if max_mem > 0.0 {
+                    (row.mem_frac / max_mem).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                row.cpu_frac = if max_cpu > 0.0 {
+                    (row.cpu_frac / max_cpu).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+            }
+            vm.set_vec(top);
         }
     };
     let set_system_models = |win: &AppWindow,
@@ -364,6 +413,19 @@ pub(super) fn wire_sidebar_refresh_and_theme(
         let net = local_net_hist.clone();
         window.on_refresh_sidebar(move || {
             if let Some(w) = weak.upgrade() {
+                refresh_sidebar(&w, &statuses, &local, &net);
+            }
+        });
+    }
+    // Mini process table: re-sort (and re-derive the top list) on header click.
+    {
+        let weak = window.as_weak();
+        let statuses = tab_statuses.clone();
+        let local = local_snap.clone();
+        let net = local_net_hist.clone();
+        window.on_sort_top_procs(move |key: SharedString| {
+            if let Some(w) = weak.upgrade() {
+                w.set_top_proc_sort(key);
                 refresh_sidebar(&w, &statuses, &local, &net);
             }
         });

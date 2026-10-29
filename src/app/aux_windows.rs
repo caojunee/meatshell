@@ -83,6 +83,9 @@ pub(super) fn wire_monitor_windows(ctx: &WinCtx) {
             pw.set_host(main.get_connection_state());
             sync_proc_theme(&main, &pw);
             let _ = pw.show();
+            // Frameless windows don't inherit the main window's Win11 rounding,
+            // so apply the same DWM hint here as well.
+            super::window::apply_window_chrome(pw.window());
             place_process_window(&main, &pw);
             pw.window().with_winit_window(|ww| ww.focus_window());
         });
@@ -141,6 +144,8 @@ pub(super) fn wire_monitor_windows(ctx: &WinCtx) {
             sw.set_resource_title(main.get_resource_title());
             sync_system_info_theme(&main, &sw);
             let _ = sw.show();
+            // Same Win11 rounding as the main and process windows.
+            super::window::apply_window_chrome(sw.window());
             place_system_info_window(&main, &sw);
             sw.window().with_winit_window(|ww| ww.focus_window());
         });

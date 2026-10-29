@@ -375,6 +375,50 @@ pub(super) fn refresh_session_rows_in_place(
     }
 }
 
+/// Flat quick-connect list for the empty pane: saved sessions only, most
+/// recently used first, capped at `limit`. Never-used sessions keep their
+/// stored order after the used ones.
+pub(super) fn recent_session_rows(store: &ConfigStore, limit: usize) -> Vec<SessionInfo> {
+    let mut sessions: Vec<&Session> = store.sessions().iter().collect();
+    // Option ordering puts `Some(..)` after `None`; reversing makes the newest
+    // timestamp first and never-used sessions last (stable order preserved).
+    sessions.sort_by(|a, b| b.last_used.cmp(&a.last_used));
+    sessions.truncate(limit);
+    sessions
+        .into_iter()
+        .map(|s| SessionInfo {
+            id: s.id.clone().into(),
+            name: s.name.clone().into(),
+            host: s.host.clone().into(),
+            serial_detail: serial_session_detail(s).into(),
+            port: s.port as i32,
+            user: s.user.clone().into(),
+            auth: s.auth.as_str().into(),
+            last_used: s
+                .last_used
+                .clone()
+                .unwrap_or_else(|| "never".to_string())
+                .into(),
+            group: s.group.clone().into(),
+            group_header: "".into(),
+            collapsed: false,
+            builtin: false,
+        })
+        .collect()
+}
+
+/// Refresh the window's recent-connections model from the store.
+pub(super) fn sync_recent_sessions(window: &AppWindow, store: &ConfigStore) {
+    use slint::Model as _;
+    if let Some(model) = window
+        .get_recent_sessions()
+        .as_any()
+        .downcast_ref::<VecModel<SessionInfo>>()
+    {
+        model.set_vec(recent_session_rows(store, 10));
+    }
+}
+
 pub(super) fn sync_sessions_to_model(store: &ConfigStore, model: &VecModel<SessionInfo>) {
     sync_sessions_to_model_with_filter(store, model, "");
 }

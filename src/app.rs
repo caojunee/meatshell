@@ -221,7 +221,7 @@ pub fn run(_intent: crate::app::launch::LaunchIntent) -> Result<()> {
     // Load the renderer preference before creating any Slint window. Reuse the
     // same store for the rest of the app so startup does not read the config
     // twice merely to select a backend (#280).
-    let config = ConfigStore::load().context("failed to load config")?;
+    let mut config = ConfigStore::load().context("failed to load config")?;
 
     // Windows frameless-window attributes must be fixed before the first Slint
     // window is created; doing it afterwards leaves some Win10 machines with an
@@ -252,9 +252,16 @@ pub fn run(_intent: crate::app::launch::LaunchIntent) -> Result<()> {
         return Ok(());
     }
 
+    // WebDAV auto-sync: pull a newer profile written by another device before
+    // the first window is built, so every setting (dock layout included)
+    // applies in one pass. Network failures fall through to local data.
+    webdav::startup_pull(&mut config);
+
     // --- Runtime + store -------------------------------------------------
     let runtime = Arc::new(Runtime::new().context("failed to start tokio runtime")?);
     let store = Rc::new(RefCell::new(config));
+    // Debounced auto-upload after successful saves (no-op unless enabled).
+    webdav::wire_auto_upload(&store);
     // Reachable from the Slint-thread event handler for recording terminal
     // commands into history (#113).
     HISTORY_STORE.with(|s| *s.borrow_mut() = Some(store.clone()));

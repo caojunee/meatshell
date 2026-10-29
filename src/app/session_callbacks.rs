@@ -68,6 +68,8 @@ pub(super) fn sync_sessions_for_window(
     if !refresh_session_rows_in_place(store, model, &query) {
         window.set_sessions_revision(window.get_sessions_revision() + 1);
     }
+    // Empty-pane quick connect card follows last-used ordering.
+    super::session_models::sync_recent_sessions(&window, store);
 }
 
 /// Parse the batch-import textarea (#150). Each non-empty, non-`#` line is
@@ -1444,8 +1446,19 @@ pub(super) fn wire_session_callbacks(
             // No followed-cwd yet: the first OSC 7 always triggers a follow.
             sftp_last_cwd.lock().unwrap().remove(&tab_id);
             // Add the new tab to the focused pane and re-flatten (this also sets
-            // active-tab-id to the new tab via refresh_panes).
-            layout.borrow_mut().add_tab(tab_id.clone());
+            // active-tab-id to the new tab via refresh_panes). When the pane is
+            // showing the new-tab page, that page is replaced by the session:
+            // it becomes an SSH tab in place instead of leaving an extra tab.
+            {
+                let mut lay = layout.borrow_mut();
+                let from_welcome = lay
+                    .leaf(lay.focused)
+                    .is_some_and(|leaf| leaf.active == "welcome");
+                if from_welcome {
+                    lay.remove_tab("welcome");
+                }
+                lay.add_tab(tab_id.clone());
+            }
             if let Some(w) = weak.upgrade() {
                 refresh_panes(
                     &w,

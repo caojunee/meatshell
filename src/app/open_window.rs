@@ -99,6 +99,9 @@ pub(super) fn open_window(
     // it just hides it, so reopening is instant.
     let proc_rows_model: Rc<VecModel<ProcRow>> = Rc::new(VecModel::default());
     window.set_proc_list(ModelRc::from(proc_rows_model.clone()));
+    // A short, sortable copy for the resource sidebar's mini table.
+    let top_procs_model: Rc<VecModel<ProcRow>> = Rc::new(VecModel::default());
+    window.set_top_procs(ModelRc::from(top_procs_model));
     let sys_metrics_model: Rc<VecModel<SysMetricRow>> = Rc::new(VecModel::default());
     let sys_net_rows_model: Rc<VecModel<SysNetRow>> = Rc::new(VecModel::default());
     let sys_disks_model: Rc<VecModel<DiskInfo>> = Rc::new(VecModel::default());
@@ -186,6 +189,10 @@ pub(super) fn open_window(
     let sessions_model: Rc<VecModel<SessionInfo>> = Rc::new(VecModel::default());
     window.set_sessions(ModelRc::from(sessions_model.clone()));
     sync_sessions_to_model(&store.borrow(), &sessions_model);
+    // Empty-pane quick connect: the ten most recently used saved sessions.
+    let recent_sessions_model: Rc<VecModel<SessionInfo>> = Rc::new(VecModel::default());
+    window.set_recent_sessions(ModelRc::from(recent_sessions_model));
+    sync_recent_sessions(&window, &store.borrow());
     window.set_wsl_profiles(wsl_profile_model(&store.borrow()));
     window.set_launch_shells(launch_shell_model(&store.borrow()));
     super::agents::wire_agent_launchers(&ctx, &sessions_model);
