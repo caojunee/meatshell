@@ -542,6 +542,10 @@ export component InterfacePanel inherits Rectangle {
     in property <bool> session-log-dir-custom;
     in-out property <bool> paste-confirm-enabled: true;
     in-out property <bool> extra-paste-shortcuts-enabled: true;
+    // SSH keepalive (Settings › Connection, #515).
+    in-out property <bool> ssh-keepalive-enabled: true;
+    in-out property <int> ssh-keepalive-interval: 30;
+    in-out property <int> ssh-keepalive-max: 3;
     in-out property <bool> zen-mode: false;
     in-out property <bool> welcome-as-sidebar;
     in-out property <bool> quick-commands-as-sidebar;
@@ -637,6 +641,7 @@ export component InterfacePanel inherits Rectangle {
     callback open-session-log-dir();
     callback set-paste-confirm-enabled(bool);
     callback set-extra-paste-shortcuts-enabled(bool);
+    callback set-ssh-keepalive(bool /* enabled */, int /* interval s */, int /* max missed */);
     callback set-zen-mode(bool);
     callback set-welcome-as-sidebar(bool);
     callback set-quick-commands-as-sidebar(bool);
@@ -697,6 +702,11 @@ export component InterfacePanel inherits Rectangle {
                     icon: "\u{E1BC}"; label: root.lang-en ? "Wallpaper & theme" : "壁纸与主题";
                     active: root.ifd-page == "wallpaper";
                     clicked => { root.ifd-page = "wallpaper"; }
+                }
+                NavItem {
+                    icon: "\u{E8BE}"; label: root.lang-en ? "Connection" : "连接";
+                    active: root.ifd-page == "connection";
+                    clicked => { root.ifd-page = "connection"; }
                 }
                 NavItem {
                     icon: "\u{E2C7}"; label: "SFTP";
@@ -1537,6 +1547,57 @@ export component InterfacePanel inherits Rectangle {
                     color: root.renderer-restart-required ? Theme.accent : Theme.text-muted;
                     font-size: 11px * Theme.panel-font;
                     wrap: word-wrap;
+                }
+            }
+
+            // --- Connection page (#515) -------------------------------
+            if root.ifd-page == "connection" : VerticalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-top: 14px;
+                spacing: 0;
+                alignment: start;
+
+                SectionHeader { text: root.lang-en ? "SSH KEEPALIVE" : "SSH 保活"; height: 24px; }
+                SettingRow {
+                    label: root.lang-en ? "Send keepalives" : "发送保活包";
+                    desc: root.lang-en
+                        ? "Stops NAT, firewalls and gateways from dropping idle SSH / SFTP connections, and reports a dead connection instead of waiting for a keypress. Applies to new connections."
+                        : "防止空闲的 SSH / SFTP 连接被 NAT、防火墙或网关回收，连接断开时也能及时提示，而不是等到按键才发现。对新建连接生效。";
+                    show-divider: root.ssh-keepalive-enabled;
+                    Switch {
+                        on: root.ssh-keepalive-enabled;
+                        toggled(v) => {
+                            root.ssh-keepalive-enabled = v;
+                            root.set-ssh-keepalive(v, root.ssh-keepalive-interval, root.ssh-keepalive-max);
+                        }
+                    }
+                }
+                if root.ssh-keepalive-enabled : SettingRow {
+                    label: root.lang-en ? "Interval" : "发送间隔";
+                    desc: root.lang-en ? "Send a keepalive after the server has been silent this long."
+                                       : "服务器持续无数据多久后发送一次保活包。";
+                    Stepper {
+                        value: root.ssh-keepalive-interval; minimum: 5; maximum: 300; step: 5; unit: "s";
+                        changed(v) => {
+                            root.ssh-keepalive-interval = v;
+                            root.set-ssh-keepalive(true, v, root.ssh-keepalive-max);
+                        }
+                    }
+                }
+                if root.ssh-keepalive-enabled : SettingRow {
+                    label: root.lang-en ? "Unanswered keepalives" : "最大无响应次数";
+                    desc: root.lang-en
+                        ? "Disconnect after this many keepalives in a row get no reply (about " + (root.ssh-keepalive-max + 1) * root.ssh-keepalive-interval + " s)."
+                        : "连续这么多次保活包无响应后断开连接(约 " + (root.ssh-keepalive-max + 1) * root.ssh-keepalive-interval + " 秒)。";
+                    show-divider: false;
+                    Stepper {
+                        value: root.ssh-keepalive-max; minimum: 2; maximum: 10; step: 1;
+                        changed(v) => {
+                            root.ssh-keepalive-max = v;
+                            root.set-ssh-keepalive(true, root.ssh-keepalive-interval, v);
+                        }
+                    }
                 }
             }
 

@@ -1312,13 +1312,69 @@ pub(crate) const COMPAT_CIPHER: &[russh::cipher::Name] = &[
     russh::cipher::TRIPLE_DES_CBC, // legacy fallback
 ];
 
+/// Default seconds of server silence before a keepalive is sent (#160, #515).
+pub const KEEPALIVE_DEFAULT_INTERVAL: u32 = 30;
+/// Default unanswered keepalives before the connection counts as dead.
+pub const KEEPALIVE_DEFAULT_MAX: u32 = 3;
+/// Settings range for the keepalive interval, in seconds.
+pub const KEEPALIVE_INTERVAL_RANGE: (u32, u32) = (5, 300);
+/// Settings range for unanswered keepalives. The minimum is 2 because russh
+/// treats `keepalive_max == 0` as "never time out" (see `keepalive_params`).
+pub const KEEPALIVE_MAX_RANGE: (u32, u32) = (2, 10);
+
+/// Process-wide SSH keepalive setting (Settings › Connection, #515), packed as
+/// `enabled << 63 | interval << 32 | max`. A global rather than a `Session`
+/// field because it is a client-wide preference read when each connection
+/// (terminal, SFTP, jump hosts, MCP) is opened; `ConfigStore` pushes it here
+/// on load and whenever it changes.
+static KEEPALIVE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(
+    pack_keepalive(true, KEEPALIVE_DEFAULT_INTERVAL, KEEPALIVE_DEFAULT_MAX),
+);
+
+const fn pack_keepalive(enabled: bool, interval_secs: u32, max_missed: u32) -> u64 {
+    ((enabled as u64) << 63) | (((interval_secs & 0x7fff_ffff) as u64) << 32) | max_missed as u64
+}
+
+/// Set the keepalive used by connections opened from now on (#515).
+pub fn set_keepalive(enabled: bool, interval_secs: u32, max_missed: u32) {
+    KEEPALIVE.store(
+        pack_keepalive(enabled, interval_secs, max_missed),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// russh `(keepalive_interval, keepalive_max)` for the user's setting.
+///
+/// russh sends a keepalive after `interval` without any data from the server
+/// and closes the connection once *more than* `keepalive_max` have gone
+/// unanswered when the timer fires again. OpenSSH's `ServerAliveCountMax = N`
+/// gives up after N unanswered probes, so pass `N - 1` to match: with the
+/// defaults (30 s, 3) a dead link is reported after about 2 minutes. The
+/// result is never 0, which russh would read as "never time out".
+fn keepalive_params(enabled: bool, interval_secs: u32, max_missed: u32) -> (Option<std::time::Duration>, usize) {
+    if !enabled {
+        return (None, 0);
+    }
+    let (lo, hi) = KEEPALIVE_INTERVAL_RANGE;
+    let interval = std::time::Duration::from_secs(u64::from(interval_secs.clamp(lo, hi)));
+    let (lo, hi) = KEEPALIVE_MAX_RANGE;
+    (Some(interval), (max_missed.clamp(lo, hi) - 1) as usize)
+}
+
+/// Apply the current keepalive setting to a client config. Every SSH
+/// connection MeatShell opens (terminal, SFTP, jump hosts) goes through here.
+pub fn apply_keepalive(config: &mut client::Config) {
+    let v = KEEPALIVE.load(std::sync::atomic::Ordering::Relaxed);
+    let enabled = v >> 63 == 1;
+    let interval = ((v >> 32) & 0x7fff_ffff) as u32;
+    let max = v as u32;
+    let (interval, max) = keepalive_params(enabled, interval, max);
+    config.keepalive_interval = interval;
+    config.keepalive_max = max;
+}
+
 fn ssh_client_config() -> Arc<client::Config> {
-    Arc::new(client::Config {
-        // Keep idle connections alive (#160). The terminal usually has the
-        // resource-monitor channel streaming every 2 s, but with shell
-        // integration disabled (#140) it can go idle and be dropped by
-        // NAT / firewall / server timeouts.
-        keepalive_interval: Some(std::time::Duration::from_secs(30)),
+    let mut config = client::Config {
         // Match the normal terminal connection exactly, including compatibility
         // fallbacks for older servers and network equipment (#172).
         preferred: russh::Preferred {
@@ -1327,7 +1383,13 @@ fn ssh_client_config() -> Arc<client::Config> {
             ..russh::Preferred::DEFAULT
         },
         ..<_>::default()
-    })
+    };
+    // Keep idle connections alive (#160) and notice dead ones (#515). The
+    // terminal usually has the resource-monitor channel streaming every 2 s,
+    // but with shell integration disabled (#140) it can go idle and be
+    // dropped by NAT / firewall / gateway timeouts.
+    apply_keepalive(&mut config);
+    Arc::new(config)
 }
 
 /// Perform the same SSH handshake and authentication as a real terminal
@@ -3070,6 +3132,35 @@ impl Handler for ClientHandler {
 fn _assert_handle_send() {
     fn takes<T: Send>() {}
     takes::<Handle<ClientHandler>>();
+}
+
+#[cfg(test)]
+mod keepalive_tests {
+    use super::{keepalive_params, KEEPALIVE_DEFAULT_INTERVAL, KEEPALIVE_DEFAULT_MAX};
+    use std::time::Duration;
+
+    #[test]
+    fn default_matches_openssh_server_alive_semantics() {
+        // #515: 30 s interval, give up after 3 unanswered keepalives. russh
+        // drops the link once *more than* keepalive_max are unanswered.
+        let (interval, max) =
+            keepalive_params(true, KEEPALIVE_DEFAULT_INTERVAL, KEEPALIVE_DEFAULT_MAX);
+        assert_eq!(interval, Some(Duration::from_secs(30)));
+        assert_eq!(max, 2);
+    }
+
+    #[test]
+    fn disabled_sends_no_keepalives() {
+        assert_eq!(keepalive_params(false, 30, 3).0, None);
+    }
+
+    #[test]
+    fn out_of_range_values_are_clamped_and_never_disable_the_timeout() {
+        // keepalive_max == 0 means "never time out" in russh, so the smallest
+        // setting must still map to 1.
+        assert_eq!(keepalive_params(true, 1, 0), (Some(Duration::from_secs(5)), 1));
+        assert_eq!(keepalive_params(true, 99_999, 99), (Some(Duration::from_secs(300)), 9));
+    }
 }
 
 #[cfg(test)]

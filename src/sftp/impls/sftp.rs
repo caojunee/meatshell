@@ -279,14 +279,7 @@ async fn run_sftp(
     ));
 
     // Open a dedicated SSH connection for SFTP.
-    let config = Arc::new(client::Config {
-        // Keep the idle SFTP connection alive (#160). Without a keepalive, an idle
-        // SFTP connection (no file ops for a while) gets silently dropped by
-        // NAT / firewall / server idle timeouts; afterwards every operation fails
-        // ("folder read failed"). Send a keepalive every 30 s so traffic never
-        // goes quiet; keepalive_max (default 3) still closes a genuinely dead
-        // connection after ~90 s of unanswered keepalives.
-        keepalive_interval: Some(std::time::Duration::from_secs(30)),
+    let mut config = client::Config {
         // Match the shell connection's algorithm set so SFTP reaches the same
         // legacy servers (#172) instead of failing with "No common algorithm".
         preferred: russh::Preferred {
@@ -295,7 +288,13 @@ async fn run_sftp(
             ..russh::Preferred::DEFAULT
         },
         ..<_>::default()
-    });
+    };
+    // Keep the idle SFTP connection alive (#160). Without a keepalive, an idle
+    // SFTP connection (no file ops for a while) gets silently dropped by
+    // NAT / firewall / server idle timeouts; afterwards every operation fails
+    // ("folder read failed"). Uses the same setting as the terminal (#515).
+    crate::ssh::apply_keepalive(&mut config);
+    let config = Arc::new(config);
 
     let addr = format!("{}:{}", session.host, session.port);
     // Isolate external-editor files by connection and keep the server in the

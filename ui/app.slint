@@ -808,6 +808,11 @@ export component AppWindow inherits Window {
     callback set-paste-confirm-enabled(bool);
     in-out property <bool> extra-paste-shortcuts-enabled: true;
     callback set-extra-paste-shortcuts-enabled(bool);
+    // SSH keepalive (Settings › Connection, #515).
+    in-out property <bool> ssh-keepalive-enabled: true;
+    in-out property <int> ssh-keepalive-interval: 30;
+    in-out property <int> ssh-keepalive-max: 3;
+    callback set-ssh-keepalive(bool, int, int);
     in-out property <bool> zen-mode: false;
     callback set-zen-mode(bool);
     // Zen empties/restores the whole dock stack without resizing the frame, so
@@ -5174,6 +5179,9 @@ export component AppWindow inherits Window {
                     session-log-dir-custom: root.session-log-dir-custom;
                     paste-confirm-enabled <=> root.paste-confirm-enabled;
                     extra-paste-shortcuts-enabled <=> root.extra-paste-shortcuts-enabled;
+                    ssh-keepalive-enabled <=> root.ssh-keepalive-enabled;
+                    ssh-keepalive-interval <=> root.ssh-keepalive-interval;
+                    ssh-keepalive-max <=> root.ssh-keepalive-max;
                     zen-mode <=> root.zen-mode;
                     welcome-as-sidebar <=> root.welcome-as-sidebar;
                     quick-commands-as-sidebar <=> root.quick-commands-as-sidebar;
@@ -5262,6 +5270,7 @@ export component AppWindow inherits Window {
                     open-session-log-dir => { root.open-session-log-dir(); }
                     set-paste-confirm-enabled(v) => { root.set-paste-confirm-enabled(v); }
                     set-extra-paste-shortcuts-enabled(v) => { root.set-extra-paste-shortcuts-enabled(v); }
+                    set-ssh-keepalive(on, interval, max) => { root.set-ssh-keepalive(on, interval, max); }
                     set-zen-mode(v) => { root.set-zen-mode(v); }
                     set-welcome-as-sidebar(v) => { root.set-welcome-as-sidebar(v); }
                     set-quick-commands-as-sidebar(v) => {
