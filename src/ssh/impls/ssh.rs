@@ -211,7 +211,7 @@ const PROMPT_SETUP_SUFFIX: &str = "__ms7'";
 #[cfg(test)]
 const PROMPT_SETUP_HISTORY_MARKER: &str = "__MEATSHELL_INTERNAL_SETUP_1";
 const PROMPT_SETUP_DONE: &str = "\u{1b}]699;ready\u{07}";
-const PROMPT_BODY: &str = "test -z \"$FISH_VERSION\" && eval '__msc(){ __c=\"$(fc -ln -1 2>/dev/null)\"; [ -n \"$__c\" ] && [ \"$__c\" != \"$__cl\" ] && { __cl=\"$__c\"; printf \"\\033]697;%s\\007\" \"$__c\"; }; }; __ms7(){ printf \"\\033]7;file://%s%s\\007\" \"$HOSTNAME\" \"$PWD\"; __msc; }; if [ -n \"$ZSH_VERSION\" ]; then autoload -Uz add-zsh-hook 2>/dev/null; add-zsh-hook precmd __ms7; else PROMPT_COMMAND=\"declare -F __ms7 >/dev/null && __ms7${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"; fi; : __MEATSHELL_INTERNAL_SETUP_1; if [ -n \"$BASH_VERSION\" ]; then __md=\"$(history 2>/dev/null | { __md=\"\"; while read -r __mn __mr; do case \"$__mr\" in *\"__ms7()\"*\"PROMPT_COMMAND=\"*) __mn=\"${__mn%\\*}\"; __md=\"$__mn $__md\";; esac; done; printf \"%s\" \"$__md\"; })\"; for __mn in $__md; do history -d \"$__mn\" 2>/dev/null; done; unset __md __mn __mr; fi; __cl=\"$(fc -ln -1 2>/dev/null)\"; printf \"\\033]699;ready\\007\"; __ms7'";
+const PROMPT_BODY: &str = "test -z \"$FISH_VERSION\" && eval '__msc(){ __c=\"$(fc -ln -1 2>/dev/null)\"; [ -n \"$__c\" ] && [ \"$__c\" != \"$__cl\" ] && { __cl=\"$__c\"; printf \"\\033]697;%s\\007\" \"$__c\"; }; }; __ms7(){ printf \"\\033]7;file://%s%s\\007\" \"$HOSTNAME\" \"$PWD\"; __msc; }; if [ -n \"$ZSH_VERSION\" ]; then autoload -Uz add-zsh-hook 2>/dev/null; add-zsh-hook precmd __ms7; for __mb in \"^[[H=beginning-of-line\" \"^[OH=beginning-of-line\" \"^[[1~=beginning-of-line\" \"^[[F=end-of-line\" \"^[OF=end-of-line\" \"^[[4~=end-of-line\" \"^[[3~=delete-char\" \"^[[2~=overwrite-mode\" \"^[[5~=beginning-of-buffer-or-history\" \"^[[6~=end-of-buffer-or-history\"; do for __mm in emacs viins; do case \"$(bindkey -M $__mm \"${__mb%%=*}\" 2>/dev/null)\" in *undefined-key) bindkey -M $__mm \"${__mb%%=*}\" \"${__mb#*=}\";; esac; done; done; unset __mb __mm; else PROMPT_COMMAND=\"declare -F __ms7 >/dev/null && __ms7${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"; fi; : __MEATSHELL_INTERNAL_SETUP_1; if [ -n \"$BASH_VERSION\" ]; then __md=\"$(history 2>/dev/null | { __md=\"\"; while read -r __mn __mr; do case \"$__mr\" in *\"__ms7()\"*\"PROMPT_COMMAND=\"*) __mn=\"${__mn%\\*}\"; __md=\"$__mn $__md\";; esac; done; printf \"%s\" \"$__md\"; })\"; for __mn in $__md; do history -d \"$__mn\" 2>/dev/null; done; unset __md __mn __mr; fi; __cl=\"$(fc -ln -1 2>/dev/null)\"; printf \"\\033]699;ready\\007\"; __ms7'";
 const PROMPT_SHELL_PROBE: &[u8] = b"if [ -n \"$BASH_VERSION\" ]; then printf '__MEATSHELL_SHELL__:bash\\n'; elif [ -n \"$ZSH_VERSION\" ]; then printf '__MEATSHELL_SHELL__:zsh\\n'; else printf '__MEATSHELL_SHELL__:other\\n'; fi";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1714,6 +1714,14 @@ async fn run_session(
     //                `precmd` hook via `add-zsh-hook` instead (non-destructive —
     //                it preserves oh-my-zsh / p10k hooks, unlike `precmd(){…}`).
     //   • fish     → guarded out (fish 3.1+ emits OSC 7 itself).
+    // zsh also gets default bindings for Home / End / Delete / Insert /
+    // PageUp / PageDown (#519): zsh ships none, so a bare or starship-only
+    // setup (Arch's default) left Home/End dead and PageUp/PageDown/Delete
+    // typing `~`. Only keys the user's config left *unbound* are touched
+    // (`bindkey` reports `undefined-key`), in the emacs and viins keymaps, so
+    // oh-my-zsh, grml, p10k and hand-written bindings win. The loop uses
+    // `key=widget` words and `case`, not zsh's `for a b in`, because bash and
+    // dash parse the whole eval body too.
     // `__ms7` is called once at the end so the initial cwd arrives immediately.
     //
     // The whole shell-specific body lives inside `eval '…'`: fish can't parse
@@ -3209,6 +3217,30 @@ mod prompt_setup_echo_tests {
         assert!(PROMPT_BODY
             .contains("PROMPT_COMMAND=\"declare -F __ms7 >/dev/null && __ms7${PROMPT_COMMAND:+;"));
         assert!(!PROMPT_BODY.contains("PROMPT_COMMAND=\"__ms7"));
+    }
+
+    #[test]
+    fn zsh_gets_default_bindings_only_for_unbound_keys() {
+        // #519: bare / starship-only zsh has no Home/End/PageUp/PageDown/Delete
+        // bindings. The setup fills them in, inside the zsh branch only.
+        let zsh = &PROMPT_BODY[PROMPT_BODY.find("if [ -n \"$ZSH_VERSION\" ]").unwrap()
+            ..PROMPT_BODY.find("else PROMPT_COMMAND=").unwrap()];
+        for binding in [
+            "^[[H=beginning-of-line",
+            "^[OH=beginning-of-line",
+            "^[[F=end-of-line",
+            "^[OF=end-of-line",
+            "^[[3~=delete-char",
+            "^[[5~=beginning-of-buffer-or-history",
+            "^[[6~=end-of-buffer-or-history",
+        ] {
+            assert!(zsh.contains(binding), "{binding}");
+        }
+        // Never override the user's own bindings, in emacs and vi insert mode.
+        assert!(zsh.contains("in *undefined-key) bindkey -M $__mm"));
+        assert!(zsh.contains("for __mm in emacs viins"));
+        // bash and dash parse the whole eval body: no zsh-only `for a b in`.
+        assert!(!zsh.contains("for __mk __mw"));
     }
 
     #[test]
