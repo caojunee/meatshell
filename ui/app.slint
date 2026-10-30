@@ -851,6 +851,8 @@ export component AppWindow inherits Window {
     in-out property <bool> mcp-use-saved-credentials: true;
     in-out property <bool> mcp-allow-commands: true;
     in-out property <bool> mcp-allow-file-transfers: true;
+    // MCP client config snippet shown in Settings › MCP (set by Rust).
+    in property <string> mcp-config-json;
     callback set-mcp-permissions(bool, bool, bool, bool);
     callback add-wsl-profile(string, string, string);
     callback remove-wsl-profile(string);
@@ -5211,6 +5213,8 @@ export component AppWindow inherits Window {
                     mcp-use-saved-credentials <=> root.mcp-use-saved-credentials;
                     mcp-allow-commands <=> root.mcp-allow-commands;
                     mcp-allow-file-transfers <=> root.mcp-allow-file-transfers;
+                    mcp-config-json: root.mcp-config-json;
+                    copy-text(t) => { root.copy-text(t); }
                     wallpaper-overlay <=> root.wallpaper-overlay;
                     current-wallpaper: root.current-wallpaper;
                     custom-wallpaper-name: root.custom-wallpaper-name;

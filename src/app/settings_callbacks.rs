@@ -60,6 +60,9 @@ pub(super) fn apply_saved_appearance(ctx: &WinCtx) {
         window.set_mcp_use_saved_credentials(s.mcp_use_saved_credentials());
         window.set_mcp_allow_commands(s.mcp_allow_commands());
         window.set_mcp_allow_file_transfers(s.mcp_allow_file_transfers());
+        // Settings › MCP: client config with this executable's real path.
+        let (command, args) = crate::mcp::client_launch();
+        window.set_mcp_config_json(crate::mcp::client_config_json(&command, &args).into());
     }
 
     {
