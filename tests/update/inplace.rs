@@ -342,32 +342,24 @@ fn disk_images_are_refused_off_macos() {
     assert!(error.contains("only supported on macOS"), "{error}");
 }
 
-/// Installed macOS builds from v0.7.8 until the .dmg-aware updater only know
-/// `meatshell-<tag>-macos-<arch>.zip`. The release workflow must keep
-/// producing and attaching that zip next to the .dmg (#503) until those
-/// builds are gone — dropping it would break their one-click updates.
+/// This fork publishes Windows and Linux packages only. Keep the Windows and
+/// Linux matrix entries, and keep macOS out of the release workflow so no
+/// unreleased .app/.dmg is attached by mistake.
 #[test]
-fn release_workflow_keeps_the_macos_update_zip() {
+fn release_workflow_builds_windows_and_linux_only() {
     let workflow = include_str!("../../.github/workflows/release.yml");
-    // Matrix names produce meatshell-<tag>-macos-<arch>.
-    assert!(workflow.contains("name: macos-aarch64"));
-    assert!(workflow.contains("name: macos-x86_64"));
+    // Matrix names produce meatshell-<tag>-windows-x86_64 and -linux-*.
+    assert!(workflow.contains("name: windows-x86_64"));
+    assert!(workflow.contains("name: linux-x86_64"));
+    assert!(workflow.contains("name: linux-aarch64"));
+    assert!(!workflow.contains("macos-"));
     assert!(workflow.contains(r#"STAGE="meatshell-${VERSION}-${{ matrix.name }}""#));
-    // The macOS branch packs the bundle into that zip and hands it to the
-    // mandatory attach step.
-    let mac = &workflow[workflow.find(r#"if [ "${{ runner.os }}" = "macOS" ]; then"#).unwrap()..];
-    let mac = &mac[..mac.find("elif").unwrap()];
-    assert!(mac.contains(r#"ditto -c -k --keepParent "$APP" "${STAGE}.zip""#));
-    assert!(mac.contains(r#"echo "ASSET=${STAGE}.zip" >> "$GITHUB_ENV""#));
     // The step from its own "- name:" up to the next step's.
     let start = workflow.find("- name: Attach to GitHub Release").unwrap();
     let end = start + 1 + workflow[start + 1..].find("- name:").unwrap();
     let attach = &workflow[start..end];
     assert!(attach.contains("files: ${{ env.ASSET }}"));
     assert!(attach.contains("fail_on_unmatched_files: true"));
-    // The .dmg is an extra, best-effort file.
-    assert!(workflow.contains("- name: Build DMG (macOS)"));
-    assert!(workflow.contains("files: ${{ env.DMG }}"));
 }
 
 /// Build `<root>/meatshell-v9.9.9-linux-x86_64/{meatshell,README.md,docs/REMOTE_MCP.md}` as a .tar.gz.

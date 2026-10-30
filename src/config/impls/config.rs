@@ -2093,6 +2093,7 @@ impl ConfigStore {
         let quick_commands = backup.config.quick_commands.len();
         self.cache = backup.config;
         self.set_webdav_settings(enabled, url, username, password, insecure);
+        self.apply_ssh_keepalive();
         self.save()?;
         Ok(BackupImport {
             added: self.cache.sessions.len(),
