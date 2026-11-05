@@ -807,3 +807,12 @@ msgstr "Optional, typed at the password prompt"
 
 msgid "MeatShell answers the device's first login and password prompts with these. Leave them blank to type them yourself."
 msgstr "MeatShell answers the device's first login and password prompts with these. Leave them blank to type them yourself."
+
+msgid "No results"
+msgstr "No results"
+
+msgid "Stop session log"
+msgstr "Stop session log"
+
+msgid "Start session log..."
+msgstr "Start session log..."

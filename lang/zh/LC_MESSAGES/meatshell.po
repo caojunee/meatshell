@@ -804,3 +804,12 @@ msgstr "可选，在密码提示时自动输入"
 
 msgid "MeatShell answers the device's first login and password prompts with these. Leave them blank to type them yourself."
 msgstr "MeatShell 会用这些信息自动回应设备首次出现的登录和密码提示。留空则由你手动输入。"
+
+msgid "No results"
+msgstr "无结果"
+
+msgid "Stop session log"
+msgstr "停止记录会话日志"
+
+msgid "Start session log..."
+msgstr "开始记录会话日志..."

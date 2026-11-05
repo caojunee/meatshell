@@ -45,6 +45,7 @@ mod shortcuts;
 mod sidebar;
 mod single_instance;
 mod tab_callbacks;
+mod tab_session_log;
 mod tab_transfer;
 mod term_output;
 mod terminal_ui;
