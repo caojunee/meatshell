@@ -1105,7 +1105,10 @@ impl ConfigStore {
         &self.cache.quick_commands
     }
 
-    pub fn set_quick_commands(&mut self, cmds: Vec<QuickCommand>) {
+    pub fn set_quick_commands(&mut self, mut cmds: Vec<QuickCommand>) {
+        for c in &mut cmds {
+            c.group = QuickCommand::normalize_group(&c.group);
+        }
         self.cache.quick_commands = cmds;
     }
 
@@ -1270,7 +1273,8 @@ impl ConfigStore {
     }
 
     /// Update one quick command in place by index (#55).
-    pub fn update_quick_command(&mut self, index: usize, cmd: QuickCommand) {
+    pub fn update_quick_command(&mut self, index: usize, mut cmd: QuickCommand) {
+        cmd.group = QuickCommand::normalize_group(&cmd.group);
         if let Some(slot) = self.cache.quick_commands.get_mut(index) {
             *slot = cmd;
         }
