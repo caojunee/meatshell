@@ -230,7 +230,7 @@ pub(super) fn wire_session_callbacks(
             w.set_dialog_rdp_width("1280".into());
             w.set_dialog_rdp_height("720".into());
             w.set_dialog_encoding("UTF-8".into());
-            w.set_dialog_vt100_drawing(false);
+            w.set_dialog_vt100_drawing(true);
             w.set_dialog_term_type(crate::config::DEFAULT_TERM_TYPE.into());
             w.set_dialog_session_log("default".into());
             w.set_dialog_disable_shell_integration(false);
