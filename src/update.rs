@@ -13,10 +13,10 @@ pub mod mirror;
 #[cfg(windows)]
 pub mod windows;
 
-pub const RELEASE_PAGE: &str = "https://github.com/yituorou/meatshell/releases/latest";
-const RELEASE_API: &str = "https://api.github.com/repos/yituorou/meatshell/releases/latest";
+pub const RELEASE_PAGE: &str = "https://github.com/caojunee/meatshell/releases/latest";
+const RELEASE_API: &str = "https://api.github.com/repos/caojunee/meatshell/releases/latest";
 const RELEASE_MANIFEST: &str =
-    "https://github.com/yituorou/meatshell/releases/latest/download/latest.json";
+    "https://github.com/caojunee/meatshell/releases/latest/download/latest.json";
 static API_RETRY_AT: Mutex<Option<SystemTime>> = Mutex::new(None);
 
 #[derive(Debug)]
@@ -186,7 +186,7 @@ impl Release {
                 && url.fragment().is_none()
                 && url.path()
                     == format!(
-                        "/yituorou/meatshell/releases/download/{}/{name}",
+                        "/caojunee/meatshell/releases/download/{}/{name}",
                         self.tag_name
                     ),
             "Unexpected installer download URL"

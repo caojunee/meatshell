@@ -3,6 +3,14 @@
 All notable changes are documented here. 本文件记录所有重要变更。
 中英对照（中文在前，English after）.
 
+## [0.8.3] - 2026-11-10
+
+- **集成上游终端 / SSH 修复与功能。** 含 zsh 默认 Home/End/PageUp/PageDown/Delete 绑定（#519）、shell 集成不再卡死且等提示符安静后再注入（#524）、shell 集成行保持在 macOS 1024 字节 tty 限制内（#541）、Shift/Alt/Ctrl 组合键不丢修饰键且登录脚本提问不被注入（#542）、VT100 线条绘制默认开启（#543）、大量日志下渲染更流畅内存更低（60Hz、紧凑回滚）、标签页菜单记录会话日志与查找显示数量并跳转（#535）、WSL 损坏时启动不再阻塞（#537）、串口按键卡顿修复（#534）、快捷命令 "default" 分组不再重复（#534）、会话窗口展开高级选项后底部按钮固定（#525）。不含 SFTP 双栏与 RDP 扩展。
+- **Integrated upstream terminal / SSH fixes and features.** Includes zsh default Home/End/PageUp/PageDown/Delete bindings (#519), shell integration that no longer freezes and waits for a quiet prompt (#524), setup lines kept under macOS's 1024-byte tty limit (#541), Shift/Alt/Ctrl modifiers preserved and login-script questions left alone (#542), VT100 line drawing on by default (#543), smoother lower-memory rendering under heavy log output, session log from the tab menu plus find count and navigation (#535), non-blocking startup when WSL is broken (#537), serial keystroke lag fix (#534), no duplicate "default" quick-command group (#534), and pinned session-dialog buttons (#525). The SFTP split view and RDP extensions are not included.
+
+- **更新源改指本 fork。** 检查更新、更新 manifest 与安装包下载来源校验从上游 `yituorou/meatshell` 改为本仓库 `caojunee/meatshell`，本仓库发布的新版本可被"检查更新"检测到并一键更新。注意：旧的 0.8.2 安装仍查上游，需手动安装一次 0.8.3，之后的版本才走本 fork 源。
+- **Update source now points at this fork.** Update checks, the update manifest and installer download-origin validation moved from upstream `yituorou/meatshell` to this repository `caojunee/meatshell`, so releases published here are detected by "Check for updates". Note: an existing 0.8.2 install still queries upstream and must be upgraded to 0.8.3 manually once; later versions then update from this fork.
+
 ## [0.8.2] - 2026-10-29
 
 - **发布包只构建 Windows 与 Linux。** 本仓库的发布流程不再构建 macOS 版本，标签发布后只附带 Windows（.zip、.msi）与 Linux（tar.gz、.deb、AppImage、Flatpak）安装包。

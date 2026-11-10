@@ -1,7 +1,7 @@
 use super::*;
 
 const URL: &str =
-    "https://github.com/yituorou/meatshell/releases/download/v0.7.9/meatshell-v0.7.9-windows-x86_64.zip";
+    "https://github.com/caojunee/meatshell/releases/download/v0.7.9/meatshell-v0.7.9-windows-x86_64.zip";
 
 #[test]
 fn only_mainland_zones_count_as_china() {

@@ -7,7 +7,7 @@
 //!
 //! A mirror is a URL prefix placed in front of the official GitHub download
 //! URL, e.g. `https://v4.gh-proxy.org/` +
-//! `https://github.com/yituorou/meatshell/releases/download/v0.7.9/meatshell-v0.7.9-windows-x86_64.zip`.
+//! `https://github.com/caojunee/meatshell/releases/download/v0.7.9/meatshell-v0.7.9-windows-x86_64.zip`.
 //!
 //! Mirrors only carry bytes. The URL behind the prefix has already passed
 //! [`Release::asset`](super::Release::asset) and the SHA-256 comes from the
@@ -178,7 +178,7 @@ pub fn probe_all(prefixes: &[String], url: &str, size: u64) -> Vec<Option<Durati
 /// The file the Settings speed test downloads the start of: the Windows zip
 /// of release `tag`, which every release ships.
 pub fn speed_test_url(tag: &str) -> String {
-    format!("https://github.com/yituorou/meatshell/releases/download/{tag}/meatshell-{tag}-windows-x86_64.zip")
+    format!("https://github.com/caojunee/meatshell/releases/download/{tag}/meatshell-{tag}-windows-x86_64.zip")
 }
 
 /// Host shown to the user for a source.
