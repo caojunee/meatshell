@@ -90,7 +90,7 @@ pub(super) fn wire_downloads_and_links(
     });
     // The open-source link in the About dialog opens the project page.
     window.on_open_repo(move || {
-        let url = "https://github.com/yituorou/meatshell";
+        let url = "https://github.com/caojunee/meatshell";
         #[cfg(windows)]
         let _ = std::process::Command::new("explorer").arg(url).spawn();
         #[cfg(target_os = "macos")]
