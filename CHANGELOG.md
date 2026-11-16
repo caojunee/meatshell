@@ -3,6 +3,20 @@
 All notable changes are documented here. 本文件记录所有重要变更。
 中英对照（中文在前，English after）.
 
+## [0.8.4] - 2026-11-16
+
+- **底部面板改成独立标签行。** 文件 / 隧道 / 进程 / 网络 / 快捷 各占一行标签；路径与工具栏移到下一行；命令输入栏常驻面板上方，“快捷”标签内查看、发送和管理快捷命令。
+- **Bottom panel gets its own tab row.** Files / Tunnels / Processes / Network / Quick each get a tab on its own row; the path bar and actions move to the row below; the command input stays above the panel, and the Quick tab lists, sends and manages saved commands.
+
+- **新增进程与网络标签。** 进程表显示 PID、用户、CPU、内存与命令行；网络表按连接列出协议、本地/远程地址、状态、PID 与进程，并显示每条 TCP 连接的上传/下载速度与累计字节（来自 `ss -i` 的 tcp_info；UDP 与监听套接字显示“—”）。
+- **New Processes and Network tabs.** The process table shows PID, user, CPU, memory and command line; the network table lists each socket's protocol, local/remote address, state, PID and process, plus per-TCP-connection upload/download speeds and cumulative bytes from `ss -i`'s tcp_info (UDP and listening sockets show "—").
+
+- **SFTP 右键“复制”与内部剪贴板。** 复制只把远程路径记到内存，不下载；粘贴时才传输——同一会话走服务端 `cp -a`（不经过本机），跨会话走暂存中转；在系统里后复制的内容仍然优先，Windows → MeatShell 的粘贴上传保持不变。
+- **SFTP right-click Copy with an in-app clipboard.** Copy only remembers remote paths in memory, no download; the transfer happens on Paste — a same-session paste runs a server-side `cp -a` (nothing crosses the local machine), a cross-session paste stages through local temp. A newer OS clipboard copy still wins, and Windows → MeatShell paste-upload is unchanged.
+
+- **交互与视觉细节。** SFTP 工具栏每个图标都有悬浮提示；设置各分组标题字号大于正文；左侧会话列表按分组缩进并加引导线；移除 SFTP 面板拖拽换停靠位置（固定停靠底部）。
+- **Interaction and visual polish.** Every SFTP toolbar icon has a hover tooltip; settings section headings are larger than their content; the session list indents sessions under their group with a guide line; the SFTP panel no longer drags to a different dock edge (fixed to the bottom).
+
 ## [0.8.3] - 2026-11-10
 
 - **集成上游终端 / SSH 修复与功能。** 含 zsh 默认 Home/End/PageUp/PageDown/Delete 绑定（#519）、shell 集成不再卡死且等提示符安静后再注入（#524）、shell 集成行保持在 macOS 1024 字节 tty 限制内（#541）、Shift/Alt/Ctrl 组合键不丢修饰键且登录脚本提问不被注入（#542）、VT100 线条绘制默认开启（#543）、大量日志下渲染更流畅内存更低（60Hz、紧凑回滚）、标签页菜单记录会话日志与查找显示数量并跳转（#535）、WSL 损坏时启动不再阻塞（#537）、串口按键卡顿修复（#534）、快捷命令 "default" 分组不再重复（#534）、会话窗口展开高级选项后底部按钮固定（#525）。不含 SFTP 双栏与 RDP 扩展。
