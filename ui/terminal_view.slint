@@ -1,6 +1,8 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 import { SftpPanel, SftpEntry, SftpTreeNode, TunnelInfo } from "sftp_panel.slint";
+import { ProcRow, NetConnRow } from "proc_window.slint";
+import { QuickCmd } from "quick_cmd.slint";
 import { TabInfo } from "tabs.slint";
 import { DockExpandButton, ToolStrip } from "widgets.slint";
 
@@ -50,20 +52,7 @@ export struct FindStatus {
 // Grouped like the welcome session list: group-header is non-empty on the first
 // row of each group; collapsed hides the group's rows in the popup; orig-index
 // points back to the entry's position in the stored list (delete target).
-export struct QuickCmd {
-    name: string,
-    command: string,
-    group: string,
-    group-header: string,
-    collapsed: bool,
-    orig-index: int,
-    // false → clicking only fills the input box (no trailing Return), so the
-    // command can be tweaked before sending; true → send + execute (B站 suggestion).
-    send-enter: bool,
-    // `command` flattened to one line for display (#419); multi-line commands
-    // used to overflow their fixed-height rows.
-    command-preview: string,
-}
+// QuickCmd now lives in quick_cmd.slint so SftpPanel can import it too.
 
 // --- MenuItem --------------------------------------------------------------
 // One row of the terminal right-click context menu (MDL2 icon + label).
@@ -323,6 +312,13 @@ export component TerminalView inherits Rectangle {
     in property <length> sftp-saved-height: 220px;    // height to restore on un-collapse
     in property <length> sftp-tree-width: 160px;
     in property <bool>   sftp-collapsed: false;       // SFTP panel minimised (toolbar only)
+    // Data shared into the bottom panel's 进程 / 网络 tabs.
+    in property <[ProcRow]> proc-list;
+    in property <[NetConnRow]> net-conns;
+    in property <[string]> net-ifaces;
+    in property <string> net-up;
+    in property <string> net-down;
+    in property <string> net-selected;
     callback set-sftp-panel-height(length);
     callback set-sftp-panel-width(length);
     callback set-sftp-saved-height(length);
@@ -331,21 +327,9 @@ export component TerminalView inherits Rectangle {
     callback set-sftp-collapsed(bool);
 
     // --- SFTP docking (within the terminal area) ---------------------------
-    // Which edge of the terminal area the SFTP panel sits on: left|right|top|bottom.
+    // The panel is fixed to the bottom edge; drag-to-re-dock was removed.
     in-out property <string> sftp-dock: "bottom";
     property <bool> sftp-horizontal: root.sftp-dock == "left" || root.sftp-dock == "right";
-    // Drag-to-dock snap state (mirrors the resource-panel docking in app.slint).
-    property <bool> sftp-panel-dragging;
-    property <float> sftp-drag-nx;
-    property <float> sftp-drag-ny;
-    property <string> sftp-dock-target:
-        !root.sftp-panel-dragging ? ""
-        : root.sftp-drag-nx < 0.22 ? "left"
-        : root.sftp-drag-nx > 0.78 ? "right"
-        : root.sftp-drag-ny < 0.22 ? "top"
-        : root.sftp-drag-ny > 0.78 ? "bottom"
-        : "";
-    callback persist-sftp-dock(string);
 
     // Command bar (#55): quick commands + input box + history (all shared/global,
     // fed from Rust); send-to-all is a per-tab toggle.
@@ -431,6 +415,7 @@ export component TerminalView inherits Rectangle {
     callback sftp-delete-selected();                // delete checked entries (#100)
     callback sftp-copy-to-target(string, string);
     callback sftp-copy-selected-to-target(string);
+    callback sftp-copy-to-clipboard(string);
     callback sftp-view(string);
     callback sftp-edit(string);
     callback sftp-open-external(string);
@@ -1521,6 +1506,8 @@ export component TerminalView inherits Rectangle {
 
         // --- Command bar (#55): quick commands + input box + history ---------
         cmd-bar := Rectangle {
+            // Always shown above the bottom panel (unless the user hid the bar);
+            // the 快捷 tab hosts the quick-command list instead of toggling it.
             visible: !root.cmd-bar-hidden;
             height: root.cmd-bar-hidden ? 0px : 34px;
             background: Theme.bg-panel-alt;
@@ -1537,27 +1524,6 @@ export component TerminalView inherits Rectangle {
                 padding-left: 8px; padding-right: 8px;
                 padding-top: 4px; padding-bottom: 4px;
                 spacing: 6px;
-
-                // Quick-command toggle. Once the sidebar has been docked, the
-                // sidebar/icon strip becomes its only entry point (#215).
-                if !root.quick-panel-docked : Rectangle {
-                    width: qc-row.preferred-width + 16px;
-                    border-radius: Theme.radius-sm;
-                    background: qc-ta.has-hover || root.quick-open ? Theme.bg-hover : Theme.bg-elevated;
-                    qc-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.history-open = false; root.quick-open = !root.quick-open; }
-                    }
-                    qc-row := HorizontalLayout {
-                        width: parent.width; height: parent.height;
-                        alignment: center;
-                        spacing: 3px;
-                        Text { text: @tr("Quick"); color: Theme.text-secondary; font-size: Theme.fs-sm;
-                               vertical-alignment: center; }
-                        Text { text: "\u{E5CE}"; font-family: "Material Icons"; color: Theme.text-muted;
-                               font-size: Theme.fs-sm; vertical-alignment: center; }
-                    }
-                }
 
                 // Command input.
                 Rectangle {
@@ -2305,7 +2271,11 @@ export component TerminalView inherits Rectangle {
         }
 
         // --- SFTP panel — positioned on the docked edge ---------------------
-        if root.sftp-available : SftpPanel {
+        // Always instantiated (visibility toggled) so the command bar can bind
+        // to its active tab; it is absolutely positioned, so an invisible panel
+        // does not affect layout.
+        sftp-panel := SftpPanel {
+            visible: root.sftp-available;
             x: root.sftp-dock == "right"  ? parent.width - parent.sf-w : 0px;
             y: root.sftp-dock == "bottom" ? parent.height - parent.sf-h : 0px;
             width:  root.sftp-horizontal ? parent.sf-w : parent.width;
@@ -2321,20 +2291,17 @@ export component TerminalView inherits Rectangle {
             show-group: root.sftp-show-group;
             toggle-column(key) => { root.toggle-sftp-column(key); }
             compact: root.sftp-collapsed && root.sftp-horizontal;  // clean strip when side+collapsed
-            dock-drag-move(ax, ay) => {
-                root.sftp-panel-dragging = true;
-                root.sftp-drag-nx = (ax - dock-region.absolute-position.x) / dock-region.width;
-                root.sftp-drag-ny = (ay - dock-region.absolute-position.y) / dock-region.height;
-            }
-            dock-drag-end() => {
-                if (root.sftp-dock-target != "") {
-                    root.sftp-dock = root.sftp-dock-target;
-                    root.persist-sftp-dock(root.sftp-dock);
-                }
-                root.sftp-panel-dragging = false;
-            }
             collapsed:     root.sftp-collapsed;
             current-tab-id: root.tab-id;
+            procs:         root.proc-list;
+            net-conns:     root.net-conns;
+            net-ifaces:    root.net-ifaces;
+            net-up:        root.net-up;
+            net-down:      root.net-down;
+            net-selected:  root.net-selected;
+            quick-commands: root.quick-commands;
+            run-quick-cmd(cmd) => { root.run-command(cmd, root.send-to-all); }
+            manage-quick-commands() => { root.manage-quick-commands(); }
             current-path:  root.sftp-path;
             entries:       root.sftp-entries;
             status:        root.sftp-status;
@@ -2385,6 +2352,7 @@ export component TerminalView inherits Rectangle {
             delete-selected()   => { root.sftp-delete-selected(); }
             copy-to-target(path, target) => { root.sftp-copy-to-target(path, target); }
             copy-selected-to-target(target) => { root.sftp-copy-selected-to-target(target); }
+            copy-to-clipboard(path) => { root.sftp-copy-to-clipboard(path); }
             view(path)          => { root.sftp-view(path); }
             edit(path)          => { root.sftp-edit(path); }
             open-external(path) => { root.sftp-open-external(path); }
@@ -2402,32 +2370,6 @@ export component TerminalView inherits Rectangle {
             copy-path(path)     => { root.sftp-copy-path(path); }
             new-folder(dir)     => { root.sftp-new-folder(dir); }
             new-file(dir)       => { root.sftp-new-file(dir); }
-        }
-
-        // Drag-to-dock snap overlay — four edge zones; the one under the cursor
-        // (sftp-dock-target) lights up. Purely visual (#dock).
-        if root.sftp-panel-dragging : Rectangle {
-            x: 0; y: 0; width: parent.width; height: parent.height;
-            Rectangle {
-                x: 0; y: 0; width: parent.width * 0.22; height: parent.height;
-                background: root.sftp-dock-target == "left" ? Theme.accent.with-alpha(0.35) : Theme.accent.with-alpha(0.10);
-                border-width: root.sftp-dock-target == "left" ? 2px : 0px; border-color: Theme.accent;
-            }
-            Rectangle {
-                x: parent.width * 0.78; y: 0; width: parent.width * 0.22; height: parent.height;
-                background: root.sftp-dock-target == "right" ? Theme.accent.with-alpha(0.35) : Theme.accent.with-alpha(0.10);
-                border-width: root.sftp-dock-target == "right" ? 2px : 0px; border-color: Theme.accent;
-            }
-            Rectangle {
-                x: 0; y: 0; width: parent.width; height: parent.height * 0.22;
-                background: root.sftp-dock-target == "top" ? Theme.accent.with-alpha(0.35) : Theme.accent.with-alpha(0.10);
-                border-width: root.sftp-dock-target == "top" ? 2px : 0px; border-color: Theme.accent;
-            }
-            Rectangle {
-                x: 0; y: parent.height * 0.78; width: parent.width; height: parent.height * 0.22;
-                background: root.sftp-dock-target == "bottom" ? Theme.accent.with-alpha(0.35) : Theme.accent.with-alpha(0.10);
-                border-width: root.sftp-dock-target == "bottom" ? 2px : 0px; border-color: Theme.accent;
-            }
         }
 
         // Collapsed → a ToolStrip icon bar at the docked edge (M5), filling the

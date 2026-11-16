@@ -4,8 +4,9 @@ use tokio::task::JoinHandle;
 use crate::config::PortForward;
 
 use super::{
-    CredentialResponder, HostKeyResponder, MfaResponder, ProcInfo, ProcessKillResult, RemoteEntry,
-    RemoteTreeNode, RuntimeTunnelInfo, SessionCommand, SystemDetails,
+    CredentialResponder, HostKeyResponder, MfaResponder, NetConnection, ProcInfo,
+    ProcessKillResult, RemoteEntry, RemoteTreeNode, RuntimeTunnelInfo, SessionCommand,
+    SystemDetails,
 };
 
 /// Events emitted back to the UI thread.
@@ -85,6 +86,10 @@ pub enum SessionEvent {
         current_user: String,
         procs: Vec<ProcInfo>,
     },
+
+    /// Per-socket network connections for the bottom panel's 网络 tab, sampled
+    /// from `ss -tunap` (or `netstat -tunap`) on the remote.
+    NetConnections(Vec<NetConnection>),
 
     /// A command the user ran in the terminal, captured via the shell hook
     /// (OSC 697) so it can join the command-box history (#113).

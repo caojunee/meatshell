@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::ssh::{ProcInfo, SystemDetails};
+use crate::ssh::{NetConnection, ProcInfo, SystemDetails};
 
 use sysinfo::{Disks, Networks, System};
 
@@ -51,6 +51,7 @@ pub(crate) struct TabStatus {
     pub(crate) net_hist: Vec<f32>,
     pub(crate) disks: Vec<(String, u64, u64)>,
     pub(crate) procs: Vec<ProcInfo>,
+    pub(crate) net_conns: Vec<NetConnection>,
     pub(crate) sys: SystemDetails,
 }
 

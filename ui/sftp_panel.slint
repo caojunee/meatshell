@@ -1,6 +1,8 @@
 import { Theme } from "theme.slint";
 import { ScrollView } from "std-widgets.slint";
 import { TabInfo } from "tabs.slint";
+import { ProcRow, NetConnRow } from "proc_window.slint";
+import { QuickCmd } from "quick_cmd.slint";
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -162,6 +164,7 @@ component SftpPlacesButton inherits Rectangle {
            font-family: "Material Icons";
            color: Theme.text-secondary; font-size: Theme.fs-sm;
            horizontal-alignment: center; vertical-alignment: center; }
+    Tooltip { text: @markdown("\{@tr("Bookmarks and recent folders")}"); }
     places-menu := PopupWindow {
         x: min(0px, root.width - self.width);
         y: root.height + 2px;
@@ -248,6 +251,7 @@ component SftpStarButton inherits Rectangle {
            color: root.bookmarked ? Theme.warning : Theme.text-secondary;
            font-size: Theme.fs-sm;
            horizontal-alignment: center; vertical-alignment: center; }
+    Tooltip { text: @markdown("\{root.bookmarked ? @tr("Remove bookmark") : @tr("Bookmark this folder")}"); }
 }
 
 // ---------------------------------------------------------------------------
@@ -332,7 +336,17 @@ export component SftpPanel inherits Rectangle {
     property <string> menu-target-name;
     property <bool>   menu-target-is-dir;
     property <int>    menu-target-mode;     // permission bits for the chmod dialog
-    property <string> panel-mode: "files";
+    in-out property <string> panel-mode: "files";
+    // Live process list for the 进程 (Processes) tab, shared with the process
+    // window and the sidebar.
+    in property <[ProcRow]> procs;                // processes tab rows
+    in property <[string]> net-ifaces;            // network tab: interface names
+    in property <string> net-up;                  // selected interface ↑ rate
+    in property <string> net-down;                // selected interface ↓ rate
+    in property <string> net-selected;
+    in property <[NetConnRow]> net-conns;          // network tab: live sockets
+    // Saved quick commands for the 快捷 tab (view + manage).
+    in property <[QuickCmd]> quick-commands;
     property <string> tunnel-kind: "local";
     property <string> tunnel-name: "";
     property <string> tunnel-bind: "127.0.0.1";
@@ -381,6 +395,10 @@ export component SftpPanel inherits Rectangle {
     callback delete-selected();     // delete all checked entries (#100)
     callback copy-to-target(string /* path */, string /* target tab */);
     callback copy-selected-to-target(string /* target tab */);
+    callback copy-to-clipboard(string /* path */);   // copy file(s) to the OS clipboard
+    // 快捷 tab: run a saved command, or open the manage/edit dialog.
+    callback run-quick-cmd(string /* command */);
+    callback manage-quick-commands();
     callback view(string);          // open read-only in the built-in viewer
     callback edit(string);          // open writable in the built-in editor
     callback open-external(string);     // open with the OS default app (#81)
@@ -404,10 +422,6 @@ export component SftpPanel inherits Rectangle {
     callback match-shortcut(string, bool, bool, bool, bool) -> string;
     // A key the file list does not handle, for the terminal (focus moves back).
     callback forward-key(string, bool /* ctrl */, bool /* alt */, bool /* shift */);
-    // Drag-to-dock: empty areas of the panel are a grab handle; coordinates are
-    // reported in window space so the parent can compute the target edge (#dock).
-    callback dock-drag-move(length /* abs-x */, length /* abs-y */);
-    callback dock-drag-end();
 
     // -----------------------------------------------------------------------
     background: Theme.bg-panel;
@@ -422,24 +436,6 @@ export component SftpPanel inherits Rectangle {
         root.select-anchor = -1;
     }
 
-    // Drag empty space to re-dock; interactive widgets (file list, tree, toolbar
-    // buttons) sit in front and capture their own events (#dock).
-    dock-bg := TouchArea {
-        mouse-cursor: move;
-        moved => {
-            if (self.pressed) {
-                root.dock-drag-move(self.absolute-position.x + self.mouse-x,
-                                    self.absolute-position.y + self.mouse-y);
-            }
-        }
-        pointer-event(ev) => {
-            if (ev.kind == PointerEventKind.up) { root.dock-drag-end(); }
-            // Grab taken away (popup, deactivation): end the gesture
-            // anyway so no dock preview is stranded.
-            else if (ev.kind == PointerEventKind.cancel) { root.dock-drag-end(); }
-        }
-    }
-
     // Hidden entirely when side-docked + collapsed: the horizontal toolbar would
     // otherwise squish into an unusable vertical strip. `visible` (not `if`) so
     // ids like path-input stay accessible to handlers. The parent floats a clean
@@ -450,13 +446,138 @@ export component SftpPanel inherits Rectangle {
 
         // --- Toolbar (full width) ------------------------------------------
         Rectangle {
-            height: root.narrow-toolbar && root.panel-mode == "files" ? 62px : 34px;
+            height: hdr-layout.preferred-height;
             background: Theme.bg-panel-alt;
 
-            VerticalLayout {
-                spacing: 6px;
+            hdr-layout := VerticalLayout {
+                spacing: 0;
 
+                // --- Tab strip: always its own row ---------------------------
                 HorizontalLayout {
+                    height: 28px;
+                    padding-left: 10px;
+                    padding-right: 6px;
+                    padding-top: 3px;
+                    padding-bottom: 1px;
+                    spacing: 4px;
+
+                    Rectangle {
+                        width: root.narrow-toolbar ? 28px : 48px;
+                        height: 22px;
+                        border-radius: Theme.radius-sm;
+                        background: root.panel-mode == "files" ? Theme.accent : (files-tab-ta.has-hover ? Theme.bg-hover : transparent);
+                        files-tab-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.panel-mode = "files"; }
+                        }
+                        Text {
+                            text: root.narrow-toolbar ? "\u{E2C7}" : @tr("Files");
+                            font-family: root.narrow-toolbar ? "Material Icons" : Theme.ui-font-family;
+                            color: root.panel-mode == "files" ? #ffffff : Theme.text-secondary;
+                            font-size: Theme.fs-xs;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        if root.narrow-toolbar : Tooltip { text: @markdown("\{@tr("Files")}"); }
+                    }
+                    Rectangle {
+                        width: root.narrow-toolbar ? 28px : 58px;
+                        height: 22px;
+                        border-radius: Theme.radius-sm;
+                        background: root.panel-mode == "tunnels" ? Theme.accent : (tunnels-tab-ta.has-hover ? Theme.bg-hover : transparent);
+                        tunnels-tab-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.panel-mode = "tunnels"; }
+                        }
+                        Text {
+                            text: root.narrow-toolbar ? "\u{E0B6}" : @tr("Tunnels");
+                            font-family: root.narrow-toolbar ? "Material Icons" : Theme.ui-font-family;
+                            color: root.panel-mode == "tunnels" ? #ffffff : Theme.text-secondary;
+                            font-size: Theme.fs-xs;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        if root.narrow-toolbar : Tooltip { text: @markdown("\{@tr("Tunnels")}"); }
+                    }
+                    Rectangle {
+                        width: root.narrow-toolbar ? 28px : 64px;
+                        height: 22px;
+                        border-radius: Theme.radius-sm;
+                        background: root.panel-mode == "processes" ? Theme.accent : (proc-tab-ta.has-hover ? Theme.bg-hover : transparent);
+                        proc-tab-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.panel-mode = "processes"; }
+                        }
+                        Text {
+                            text: root.narrow-toolbar ? "P" : @tr("Processes");
+                            font-family: Theme.ui-font-family;
+                            color: root.panel-mode == "processes" ? #ffffff : Theme.text-secondary;
+                            font-size: Theme.fs-xs;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        if root.narrow-toolbar : Tooltip { text: @markdown("\{@tr("Processes")}"); }
+                    }
+                    Rectangle {
+                        width: root.narrow-toolbar ? 28px : 56px;
+                        height: 22px;
+                        border-radius: Theme.radius-sm;
+                        background: root.panel-mode == "network" ? Theme.accent : (net-tab-ta.has-hover ? Theme.bg-hover : transparent);
+                        net-tab-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.panel-mode = "network"; }
+                        }
+                        Text {
+                            text: root.narrow-toolbar ? "N" : @tr("Network");
+                            font-family: Theme.ui-font-family;
+                            color: root.panel-mode == "network" ? #ffffff : Theme.text-secondary;
+                            font-size: Theme.fs-xs;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        if root.narrow-toolbar : Tooltip { text: @markdown("\{@tr("Network")}"); }
+                    }
+                    Rectangle {
+                        width: root.narrow-toolbar ? 28px : 48px;
+                        height: 22px;
+                        border-radius: Theme.radius-sm;
+                        background: root.panel-mode == "quick" ? Theme.accent : (quick-tab-ta.has-hover ? Theme.bg-hover : transparent);
+                        quick-tab-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.panel-mode = "quick"; }
+                        }
+                        Text {
+                            text: root.narrow-toolbar ? "Q" : @tr("Quick");
+                            font-family: Theme.ui-font-family;
+                            color: root.panel-mode == "quick" ? #ffffff : Theme.text-secondary;
+                            font-size: Theme.fs-xs;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        if root.narrow-toolbar : Tooltip { text: @markdown("\{@tr("Quick")}"); }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+
+                    // Minimise / restore the SFTP panel (#41) — panel-level.
+                    Rectangle {
+                        width: 24px; height: 22px;
+                        border-radius: Theme.radius-sm;
+                        background: min-ta.has-hover ? Theme.bg-hover : transparent;
+                        min-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.toggle-collapsed(); }
+                        }
+                        Text { text: root.collapsed ? "\u{E5CE}" : "\u{E5CF}"; font-family: "Material Icons";
+                               color: Theme.text-secondary; font-size: Theme.fs-md;
+                               horizontal-alignment: center; vertical-alignment: center; }
+                        Tooltip { text: @markdown("\{root.collapsed ? @tr("Restore panel") : @tr("Minimize panel")}"); }
+                    }
+                }
+
+                // --- Row 2: files context (path + actions) -------------------
+                HorizontalLayout {
+                    visible: root.panel-mode == "files";
                 height: 34px;
                 // Pushed the left padding from 6px to 10px so the dock drag grip
                 // sits a bit further from the panel edge and the Files tab no longer
@@ -467,86 +588,7 @@ export component SftpPanel inherits Rectangle {
                 padding-bottom: 6px;
                 spacing: 4px;
 
-                // Dedicated drag handle to re-dock the panel. The toolbar is full
-                // of controls, so dragging "empty space" is unreliable; this grip
-                // is always grabbable and reports window-space coords (#dock).
-                Rectangle {
-                    width: 16px;
-                    y: (parent.height - self.height) / 2;
-                    height: 22px;
-                    grip-ta := TouchArea {
-                        mouse-cursor: move;
-                        moved => {
-                            if (self.pressed) {
-                                root.dock-drag-move(self.absolute-position.x + self.mouse-x,
-                                                    self.absolute-position.y + self.mouse-y);
-                            }
-                        }
-                        pointer-event(ev) => {
-                            if (ev.kind == PointerEventKind.up) { root.dock-drag-end(); }
-                            // Grab taken away (popup, deactivation): end the
-                            // gesture anyway so no dock preview is stranded.
-                            else if (ev.kind == PointerEventKind.cancel) { root.dock-drag-end(); }
-                        }
-                    }
-                    Text {
-                        text: "\u{E945}";   // drag_indicator
-                        font-family: "Material Icons";
-                        color: grip-ta.has-hover ? Theme.text-secondary : Theme.text-muted;
-                        font-size: 16px;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        width: parent.width;
-                        height: parent.height;
-                    }
-                }
-
-                // Small transparent spacer between the dock drag grip and the Files
-                // tab. Without it the grip's hover state visually bleeds into the
-                // tab's background, making the two look like a single overlapping
-                // shape (#toolbar-shadow-overlap).
-                Rectangle {
-                    width: 6px;
-                    height: 22px;
-                    background: transparent;
-                }
-
-                Rectangle {
-                    width: root.narrow-toolbar ? 28px : 48px;
-                    height: 22px;
-                    border-radius: Theme.radius-sm;
-                    background: root.panel-mode == "files" ? Theme.accent : (files-tab-ta.has-hover ? Theme.bg-hover : transparent);
-                    files-tab-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.panel-mode = "files"; }
-                    }
-                    Text {
-                        text: root.narrow-toolbar ? "\u{E2C7}" : @tr("Files");
-                        font-family: root.narrow-toolbar ? "Material Icons" : Theme.ui-font-family;
-                        color: root.panel-mode == "files" ? #ffffff : Theme.text-secondary;
-                        font-size: Theme.fs-xs;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                }
-                Rectangle {
-                    width: root.narrow-toolbar ? 28px : 58px;
-                    height: 22px;
-                    border-radius: Theme.radius-sm;
-                    background: root.panel-mode == "tunnels" ? Theme.accent : (tunnels-tab-ta.has-hover ? Theme.bg-hover : transparent);
-                    tunnels-tab-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.panel-mode = "tunnels"; }
-                    }
-                    Text {
-                        text: root.narrow-toolbar ? "\u{E0B6}" : @tr("Tunnels");
-                        font-family: root.narrow-toolbar ? "Material Icons" : Theme.ui-font-family;
-                        color: root.panel-mode == "tunnels" ? #ffffff : Theme.text-secondary;
-                        font-size: Theme.fs-xs;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                }
+                // Files / Tunnels tabs now live in the dedicated tab strip row.
 
                 // In compact mode keep navigation tabs at the left and primary
                 // actions aligned at the right. The path gets the full second row.
@@ -565,6 +607,7 @@ export component SftpPanel inherits Rectangle {
                     }
                     Text { text: "↑"; color: Theme.text-secondary; font-size: Theme.fs-md;
                            horizontal-alignment: center; vertical-alignment: center; }
+                    Tooltip { text: @markdown("\{@tr("Parent folder")}"); }
                 }
 
                 // Editable path bar: type or paste a path and press Enter to
@@ -631,6 +674,7 @@ export component SftpPanel inherits Rectangle {
                     Text { text: "\u{E14D}"; font-family: "Material Icons";
                            color: Theme.text-secondary; font-size: Theme.fs-sm;
                            horizontal-alignment: center; vertical-alignment: center; }
+                    Tooltip { text: @markdown("\{@tr("Copy path")}"); }
                 }
 
                 // Paste a path from the clipboard and jump straight to it.
@@ -650,6 +694,7 @@ export component SftpPanel inherits Rectangle {
                     Text { text: "\u{E14F}"; font-family: "Material Icons";
                            color: Theme.text-secondary; font-size: Theme.fs-sm;
                            horizontal-alignment: center; vertical-alignment: center; }
+                    Tooltip { text: @markdown("\{@tr("Paste and go")}"); }
                 }
 
                 up-btn := Rectangle {
@@ -663,6 +708,7 @@ export component SftpPanel inherits Rectangle {
                     }
                     Text { text: "↑"; color: Theme.text-secondary; font-size: Theme.fs-md;
                            horizontal-alignment: center; vertical-alignment: center; }
+                    Tooltip { text: @markdown("\{@tr("Parent folder")}"); }
                 }
 
                 // Upload: a small menu offers file vs folder (#85). The remote
@@ -678,6 +724,7 @@ export component SftpPanel inherits Rectangle {
                     }
                     Text { text: root.narrow-toolbar ? "↑" : @tr("Upload"); color: #ffffff; font-size: Theme.fs-sm;
                            horizontal-alignment: center; vertical-alignment: center; }
+                    if root.narrow-toolbar : Tooltip { text: @markdown("\{@tr("Upload")}"); }
                     ul-menu := PopupWindow {
                         x: 0; y: parent.height + 2px;
                         width: 124px;
@@ -725,6 +772,7 @@ export component SftpPanel inherits Rectangle {
                         horizontal-alignment: center;
                         vertical-alignment: center;
                     }
+                    Tooltip { text: @markdown("\{@tr("More actions")}"); }
                     compact-more-menu := PopupWindow {
                         x: parent.width - self.width;
                         y: parent.height + 2px;
@@ -790,6 +838,7 @@ export component SftpPanel inherits Rectangle {
                     dls-ta := TouchArea { mouse-cursor: pointer; clicked => { root.download-selected(); } }
                     Text { text: "\u{E2C4}"; font-family: "Material Icons"; color: Theme.text-secondary;
                            font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; }
+                    Tooltip { text: @markdown("\{@tr("Download selected")}"); }
                 }
                 if root.panel-mode == "files" && root.selected-count > 0 && !root.narrow-toolbar : Rectangle {
                     width: 24px; height: 22px;
@@ -798,6 +847,7 @@ export component SftpPanel inherits Rectangle {
                     dels-ta := TouchArea { mouse-cursor: pointer; clicked => { root.delete-selected(); } }
                     Text { text: "\u{E872}"; font-family: "Material Icons"; color: Theme.danger;
                            font-size: Theme.fs-md; horizontal-alignment: center; vertical-alignment: center; }
+                    Tooltip { text: @markdown("\{@tr("Delete selected")}"); }
                 }
 
                 Rectangle {
@@ -812,22 +862,9 @@ export component SftpPanel inherits Rectangle {
                     Text { text: "\u{E5D5}"; font-family: "Material Icons";
                            color: Theme.text-secondary; font-size: Theme.fs-sm;
                            horizontal-alignment: center; vertical-alignment: center; }
+                    Tooltip { text: @markdown("\{@tr("Refresh")}"); }
                 }
 
-                // Minimise / restore the SFTP panel (#41).
-                Rectangle {
-                    width: 24px; height: 22px;
-                    border-radius: Theme.radius-sm;
-                    background: min-ta.has-hover ? Theme.bg-hover : transparent;
-                    min-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.toggle-collapsed(); }
-                    }
-                    // expand_less (▲, restore) when collapsed, expand_more (▼) otherwise.
-                    Text { text: root.collapsed ? "\u{E5CE}" : "\u{E5CF}"; font-family: "Material Icons";
-                           color: Theme.text-secondary; font-size: Theme.fs-md;
-                           horizontal-alignment: center; vertical-alignment: center; }
-                }
                 }
 
                 // Preserve path navigation in the side-docked compact layout by
@@ -1451,7 +1488,7 @@ export component SftpPanel inherits Rectangle {
                         x: root.menu-x;
                         y: root.menu-y;
                         width: 148px;
-                        height: 15 * 27px + 8px;
+                        height: 16 * 27px + 8px;
                         Rectangle {
                             background: Theme.popup-bg;
                             border-radius: Theme.radius-sm;
@@ -1498,6 +1535,11 @@ export component SftpPanel inherits Rectangle {
                                     clicked => { root.chmod-request(root.menu-target, root.menu-target-name, root.menu-target-mode); }
                                 }
                                 SftpMenuItem {
+                                    label: @tr("Copy");
+                                    enabled: root.menu-target != "" || root.selected-count > 0;
+                                    clicked => { root.copy-to-clipboard(root.menu-target); }
+                                }
+                                SftpMenuItem {
                                     label: @tr("Copy path");
                                     enabled: root.menu-target != "";
                                     clicked => { root.copy-path(root.menu-target); }
@@ -1542,6 +1584,186 @@ export component SftpPanel inherits Rectangle {
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // --- 进程 (Processes) ----------------------------------------------
+        if root.panel-mode == "processes" : VerticalLayout {
+            vertical-stretch: 1;
+            spacing: 0;
+
+            Rectangle {
+                height: 22px;
+                background: Theme.bg-root;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 8px;
+                    Text { text: "PID"; width: 64px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: @tr("User"); width: 90px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: "CPU%"; width: 52px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: @tr("Memory"); width: 56px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: @tr("Command"); horizontal-stretch: 1; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.border-subtle; }
+
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 0;
+                    for p in root.procs : Rectangle {
+                        height: 22px;
+                        background: Theme.bg-panel;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 8px;
+                            Text { text: p.pid; width: 64px; color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
+                            Text { text: p.user; width: 90px; color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
+                            Text { text: p.cpu; width: 52px; color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
+                            Text { text: p.mem; width: 56px; color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
+                            Text { text: p.command; horizontal-stretch: 1; color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
+                        }
+                    }
+                    if root.procs.length == 0 : Rectangle {
+                        height: 60px;
+                        Text { text: @tr("No processes"); color: Theme.text-muted; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+
+        // --- 网络 (Network): live sockets ------------------------------------
+        if root.panel-mode == "network" : VerticalLayout {
+            vertical-stretch: 1;
+            spacing: 0;
+
+            // Selected interface + its live rates, then the socket table.
+            Rectangle {
+                height: 22px;
+                background: Theme.bg-root;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 8px;
+                    Text { text: root.net-selected; width: 120px; color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
+                    Text { text: "↑ " + root.net-up; width: 110px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: "↓ " + root.net-down; width: 110px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: @tr("Connections") + ": " + root.net-conns.length; horizontal-stretch: 1; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.border-subtle; }
+
+            Rectangle {
+                height: 22px;
+                background: Theme.bg-root;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 8px;
+                    Text { text: @tr("Protocol"); width: 44px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: @tr("Local address"); width: 140px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: @tr("Remote address"); width: 140px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: @tr("State"); width: 60px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: "PID"; width: 50px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: @tr("Process"); min-width: 60px; horizontal-stretch: 1; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: @tr("Upload speed"); width: 76px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: @tr("Download speed"); width: 76px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: @tr("Uploaded"); width: 70px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                    Text { text: @tr("Downloaded"); width: 70px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.border-subtle; }
+
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 0;
+                    for c in root.net-conns : Rectangle {
+                        height: 22px;
+                        background: Theme.bg-panel;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 8px;
+                            Text { text: c.proto; width: 44px; color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
+                            Text { text: c.local; width: 140px; color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
+                            Text { text: c.remote; width: 140px; color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
+                            Text { text: c.state; width: 60px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                            Text { text: c.pid; width: 50px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                            Text { text: c.process; min-width: 60px; horizontal-stretch: 1; color: Theme.text-primary; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
+                            Text { text: c.up-rate; width: 76px; color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
+                            Text { text: c.down-rate; width: 76px; color: Theme.text-secondary; font-size: Theme.fs-xs; vertical-alignment: center; }
+                            Text { text: c.uploaded; width: 70px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                            Text { text: c.downloaded; width: 70px; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; }
+                        }
+                    }
+                    if root.net-conns.length == 0 : Rectangle {
+                        height: 60px;
+                        Text { text: @tr("No network data"); color: Theme.text-muted; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+
+        // --- 快捷: saved quick commands (view + send + manage) --------------
+        if root.panel-mode == "quick" : VerticalLayout {
+            vertical-stretch: 1;
+            spacing: 0;
+
+            Rectangle {
+                height: 26px;
+                background: Theme.bg-root;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 6px;
+                    Text { text: @tr("Quick commands"); color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; horizontal-stretch: 1; }
+                    Rectangle {
+                        width: 64px; height: 20px;
+                        border-radius: Theme.radius-sm;
+                        background: mg-ta.has-hover ? Theme.bg-hover : transparent;
+                        mg-ta := TouchArea { mouse-cursor: pointer; clicked => { root.manage-quick-commands(); } }
+                        Text { text: @tr("Manage..."); color: Theme.accent; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.border-subtle; }
+
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 0;
+                    for q in root.quick-commands : Rectangle {
+                        height: 26px;
+                        background: q.group-header != "" ? Theme.bg-panel-alt : Theme.bg-panel;
+                        if q.group-header != "" : HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 6px;
+                            Text { text: q.group-header; color: Theme.text-secondary; font-size: Theme.fs-xs; font-weight: 600; vertical-alignment: center; }
+                        }
+                        if q.group-header == "" : HorizontalLayout {
+                            padding-left: 16px;
+                            padding-right: 8px;
+                            spacing: 8px;
+                            Text { text: q.name; width: 140px; color: Theme.text-primary; font-size: Theme.fs-sm; vertical-alignment: center; overflow: elide; }
+                            Text { text: q.command-preview; horizontal-stretch: 1; color: Theme.text-muted; font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
+                            Rectangle {
+                                width: 40px; height: 20px;
+                                border-radius: Theme.radius-sm;
+                                background: run-ta.has-hover ? Theme.bg-hover : transparent;
+                                run-ta := TouchArea { mouse-cursor: pointer; clicked => { root.run-quick-cmd(q.command); } }
+                                Text { text: @tr("Send"); color: Theme.accent; font-size: Theme.fs-xs; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                    if root.quick-commands.length == 0 : Rectangle {
+                        height: 60px;
+                        Text { text: @tr("No quick commands"); color: Theme.text-muted; font-size: Theme.fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
             }

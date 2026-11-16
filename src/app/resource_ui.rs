@@ -73,6 +73,40 @@ pub(super) fn proc_rows(procs: &[ProcInfo], current_user: &str, tab_id: &str) ->
         .collect()
 }
 
+pub(super) fn net_conn_rows(conns: &[NetConnection]) -> Vec<NetConnRow> {
+    conns
+        .iter()
+        .map(|c| {
+            let rate = |v: f64| {
+                if c.has_bytes {
+                    crate::resource::system::format_bytes_per_sec(v.max(0.0) as u64)
+                } else {
+                    "—".to_string()
+                }
+            };
+            let total = |v: u64| {
+                if c.has_bytes {
+                    crate::ssh::format_size(v)
+                } else {
+                    "—".to_string()
+                }
+            };
+            NetConnRow {
+                proto: c.proto.clone().into(),
+                local: c.local.clone().into(),
+                remote: c.remote.clone().into(),
+                state: c.state.clone().into(),
+                pid: c.pid.clone().into(),
+                process: c.process.clone().into(),
+                up_rate: rate(c.up_rate).into(),
+                down_rate: rate(c.down_rate).into(),
+                uploaded: total(c.sent).into(),
+                downloaded: total(c.received).into(),
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 #[path = "../../tests/app/process_monitor/mod.rs"]
 mod process_row_tests;

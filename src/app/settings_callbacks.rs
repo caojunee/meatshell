@@ -380,7 +380,9 @@ pub(super) fn wire_layout_prefs(ctx: &WinCtx) {
         window.set_sftp_show_permissions(columns.iter().any(|column| column == "permissions"));
         window.set_sftp_show_owner(columns.iter().any(|column| column == "owner"));
         window.set_sftp_show_group(columns.iter().any(|column| column == "group"));
-        window.set_sftp_dock(s.sftp_dock().into());
+        // SFTP panel is fixed to the bottom edge; drag-to-re-dock was removed,
+        // so ignore any previously persisted edge.
+        window.set_sftp_dock("bottom".into());
         window.set_quick_commands_as_sidebar(quick_commands_as_sidebar);
         window.set_quick_panel_open(quick_panel_open);
         window.set_quick_panel_collapsed(quick_panel_collapsed);

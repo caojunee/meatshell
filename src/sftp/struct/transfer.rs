@@ -55,6 +55,10 @@ pub enum SftpCommand {
         target: UnboundedSender<SftpCommand>,
         target_dir: String,
     },
+    /// Paste entries copied within MeatShell into `dest_dir` on the *same*
+    /// session: run a server-side `cp -a` so the bytes never round-trip through
+    /// the local machine (copying a huge file stays instant).
+    CopyRemote { paths: Vec<String>, dest_dir: String },
     /// Delete a remote file (falls back to removing an empty directory).
     Delete(String),
     /// Download a file to a temp dir and open it with the OS default app

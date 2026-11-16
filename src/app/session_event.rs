@@ -189,6 +189,14 @@ pub(super) fn apply_session_event_to_window(
                 refresh_process_model(win, statuses);
             }
         }
+        SessionEvent::NetConnections(conns) => {
+            if let Some(st) = statuses.lock().unwrap().get_mut(tab_id) {
+                st.net_conns = conns;
+            }
+            if win.get_active_tab_id().as_str() == tab_id {
+                refresh_net_conn_model(win, statuses);
+            }
+        }
         SessionEvent::TunnelUpdate(rows) => {
             let items = rows
                 .into_iter()

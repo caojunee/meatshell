@@ -82,11 +82,12 @@ component NavItem inherits Rectangle {
     }
 }
 
-// Small muted group heading (字体 / 预览 / SFTP …).
+// Group heading (字体 / 预览 / SFTP …). Kept larger than the 13px row labels so a
+// section title never reads smaller than the content it introduces.
 component SectionHeader inherits Text {
-    font-size: 11px * Theme.panel-font;
+    font-size: 14px * Theme.panel-font;
     font-weight: 700;
-    color: Theme.text-muted;
+    color: Theme.text-secondary;
     vertical-alignment: center;
 }
 

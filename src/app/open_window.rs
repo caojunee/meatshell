@@ -102,6 +102,9 @@ pub(super) fn open_window(
     // A short, sortable copy for the resource sidebar's mini table.
     let top_procs_model: Rc<VecModel<ProcRow>> = Rc::new(VecModel::default());
     window.set_top_procs(ModelRc::from(top_procs_model));
+    // Live sockets for the bottom panel's 网络 tab.
+    let net_conns_model: Rc<VecModel<NetConnRow>> = Rc::new(VecModel::default());
+    window.set_net_conns(ModelRc::from(net_conns_model));
     let sys_metrics_model: Rc<VecModel<SysMetricRow>> = Rc::new(VecModel::default());
     let sys_net_rows_model: Rc<VecModel<SysNetRow>> = Rc::new(VecModel::default());
     let sys_disks_model: Rc<VecModel<DiskInfo>> = Rc::new(VecModel::default());

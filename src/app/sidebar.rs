@@ -9,11 +9,8 @@ pub(super) fn sidebar_updates_visible(win: &AppWindow) -> bool {
 }
 
 pub(super) fn refresh_process_model(win: &AppWindow, statuses: &TabStatuses) {
-    // The detached process window can be focused while the main window is not,
-    // so its own open state—not main-window activity—controls live updates.
-    if !win.get_process_window_open() {
-        return;
-    }
+    // The process list feeds both the detached process window and the bottom
+    // panel's 进程 tab, so keep it live even when the window is closed.
     let active = win.get_active_tab_id().to_string();
     let rows = statuses
         .lock()
@@ -26,6 +23,24 @@ pub(super) fn refresh_process_model(win: &AppWindow, statuses: &TabStatuses) {
         .get_proc_list()
         .as_any()
         .downcast_ref::<VecModel<ProcRow>>()
+    {
+        model.set_vec(rows);
+    }
+}
+
+/// Project the active tab's socket list into the 网络 tab's model.
+pub(super) fn refresh_net_conn_model(win: &AppWindow, statuses: &TabStatuses) {
+    let active = win.get_active_tab_id().to_string();
+    let rows = statuses
+        .lock()
+        .unwrap()
+        .get(&active)
+        .map(|status| net_conn_rows(&status.net_conns))
+        .unwrap_or_default();
+    if let Some(model) = win
+        .get_net_conns()
+        .as_any()
+        .downcast_ref::<VecModel<NetConnRow>>()
     {
         model.set_vec(rows);
     }

@@ -22,9 +22,10 @@ import { SessionDialog, SessionDraft, PortFwd, TriggerDraft, JumpHop } from "ses
 import { ConfirmDialog } from "confirm_dialog.slint";
 import { ModalLayer, ModalKind } from "modal.slint";
 import { LabeledInput, PrimaryButton, GhostButton, DockExpandButton, IconButton, ToolStrip } from "widgets.slint";
-import { TerminalView, TermSpan, TermMatch, FindStatus, QuickCmd, QuickDockPanel } from "terminal_view.slint";
+import { TerminalView, TermSpan, TermMatch, FindStatus, QuickDockPanel } from "terminal_view.slint";
+import { QuickCmd } from "quick_cmd.slint";
 import { SftpEntry, SftpTreeNode, TunnelInfo } from "sftp_panel.slint";
-import { ProcWindow, ProcRow } from "proc_window.slint";
+import { ProcWindow, ProcRow, NetConnRow } from "proc_window.slint";
 import { SystemInfoWindow, SysInfoRow, SysMetricRow, SysNetRow } from "system_info_window.slint";
 import { EditorWindow } from "editor_window.slint";
 import { EditorPane, EditorFindResult, EditorDoc } from "editor_pane.slint";
@@ -609,6 +610,7 @@ export component AppWindow inherits Window {
     in-out property <string> top-proc-sort: "mem";
     callback sort-top-procs(string);
     in property <[ProcRow]> proc-list;       // top remote processes by CPU
+    in property <[NetConnRow]> net-conns;    // live sockets for the 网络 tab
     callback open-system-info();
     in-out property <bool> system-info-window-open: false;
     in property <bool> system-info-available; // connected Linux session only (#268)
@@ -1342,6 +1344,7 @@ export component AppWindow inherits Window {
     callback sftp-delete-selected(string /* tab-id */);               // (#100)
     callback sftp-copy-to-target(string /* tab-id */, string /* remote-path */, string /* target-tab-id */);
     callback sftp-copy-selected-to-target(string /* tab-id */, string /* target-tab-id */);
+    callback sftp-copy-to-clipboard(string /* tab-id */, string /* remote-path */);
     callback sftp-view(string /* tab-id */, string /* path */);
     callback sftp-edit(string /* tab-id */, string /* path */);
     callback sftp-open-external(string /* tab-id */, string /* path */);
@@ -2212,6 +2215,13 @@ export component AppWindow inherits Window {
                         set-sftp-saved-height(v) => { root.set-pane-sftp-saved-height(term.id, v); }
                         sftp-tree-width: root.sftp-tree-width;
                         persist-sftp-tree-width(v) => { root.persist-sftp-tree-width(v); }
+                        // Bottom-panel 进程 / 网络 tab data.
+                        proc-list: root.proc-list;
+                        net-conns: root.net-conns;
+                        net-ifaces: root.net-ifaces;
+                        net-up: root.net-top-up;
+                        net-down: root.net-top-down;
+                        net-selected: root.net-selected;
                         sftp-show-type: root.sftp-show-type;
                         sftp-show-size: root.sftp-show-size;
                         sftp-show-modified: root.sftp-show-modified;
@@ -2310,6 +2320,7 @@ export component AppWindow inherits Window {
                         sftp-download-selected() => { root.sftp-download-selected(term.id); }
                         sftp-copy-to-target(path, target) => { root.sftp-copy-to-target(term.id, path, target); }
                         sftp-copy-selected-to-target(target) => { root.sftp-copy-selected-to-target(term.id, target); }
+                        sftp-copy-to-clipboard(path) => { root.sftp-copy-to-clipboard(term.id, path); }
                         // Confirm before deleting the checked entries (#100), reusing
                         // the delete-confirm dialog in batch mode.
                         sftp-delete-selected() => {

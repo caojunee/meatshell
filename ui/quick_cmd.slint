@@ -1,0 +1,17 @@
+// Shared quick-command row type. Lives in its own file so both TerminalView
+// (command bar) and SftpPanel (bottom 快捷 tab) can import it without a
+// circular dependency.
+
+export struct QuickCmd {
+    name: string,
+    command: string,
+    group: string,
+    group-header: string,
+    collapsed: bool,
+    orig-index: int,
+    // false → clicking only fills the input box (no trailing Return), so the
+    // command can be tweaked before sending; true → send + execute.
+    send-enter: bool,
+    // `command` flattened to one line for display (#419).
+    command-preview: string,
+}

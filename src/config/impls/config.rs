@@ -1610,14 +1610,6 @@ impl ConfigStore {
         }
         self.cache.sftp_visible_columns = normalized;
     }
-    pub fn sftp_dock(&self) -> String {
-        let d = self.cache.sftp_dock.trim();
-        if d.is_empty() {
-            "bottom".into()
-        } else {
-            d.to_string()
-        }
-    }
     pub fn set_sftp_dock(&mut self, v: String) {
         self.cache.sftp_dock = v;
     }

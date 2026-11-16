@@ -30,7 +30,9 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use crate::config::{AuthMethod, Session};
 use crate::i18n::t;
-use crate::ssh::{format_mtime, format_size, RemoteEntry, RemoteTreeNode, SessionEvent};
+use crate::ssh::{
+    format_mtime, format_size, NetConnection, RemoteEntry, RemoteTreeNode, SessionEvent,
+};
 
 use super::elevation::Elevation;
 use super::transfer::{DownloadConflict, SftpCommand, SftpHandle};
@@ -77,6 +79,9 @@ impl SftpHandle {
             target,
             target_dir,
         });
+    }
+    pub fn copy_remote(&self, paths: Vec<String>, dest_dir: String) {
+        let _ = self.commands.send(SftpCommand::CopyRemote { paths, dest_dir });
     }
     pub fn toggle_tree_node(&self, path: String) {
         let _ = self.commands.send(SftpCommand::ToggleTreeNode(path));
@@ -576,6 +581,56 @@ async fn run_sftp(
     // Own every transfer task. Dropping/aborting the worker cancels transfers
     // too, rather than leaving detached writes alive after an MCP cancellation.
     let mut transfers = tokio::task::JoinSet::new();
+
+    // --- Network connections probe (网络 tab) ------------------------------
+    // Low-frequency, best-effort socket listing over this SFTP connection's own
+    // SSH channel. Ends when the connection or the UI goes away.
+    {
+        let net_handle = handle.clone();
+        let net_events = events.clone();
+        tokio::spawn(async move {
+            let mut prev: HashMap<String, (u64, u64)> = HashMap::new();
+            let mut last_at = std::time::Instant::now();
+            loop {
+                if net_events.is_closed() {
+                    break;
+                }
+                match exec_remote_output(&net_handle.handle, NET_CONN_CMD).await {
+                    Ok((_, out)) => {
+                        let mut conns = parse_net_connections(&out);
+                        let now = std::time::Instant::now();
+                        let elapsed = now.duration_since(last_at).as_secs_f64().max(0.001);
+                        for c in &mut conns {
+                            if !c.has_bytes {
+                                continue;
+                            }
+                            if let Some(&(prev_sent, prev_recv)) = prev.get(&net_conn_key(c)) {
+                                // Counters only grow; a reset means a new
+                                // connection reusing the tuple — show 0.
+                                if c.sent >= prev_sent {
+                                    c.up_rate = (c.sent - prev_sent) as f64 / elapsed;
+                                }
+                                if c.received >= prev_recv {
+                                    c.down_rate = (c.received - prev_recv) as f64 / elapsed;
+                                }
+                            }
+                        }
+                        prev = conns
+                            .iter()
+                            .filter(|c| c.has_bytes)
+                            .map(|c| (net_conn_key(c), (c.sent, c.received)))
+                            .collect();
+                        last_at = now;
+                        let _ = net_events.send(SessionEvent::NetConnections(conns));
+                    }
+                    // A dead connection (or a server that forbids exec) ends the
+                    // probe; the panel keeps whatever it last showed.
+                    Err(_) => break,
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        });
+    }
 
     // --- Command loop -------------------------------------------------------
     loop {
@@ -1140,6 +1195,50 @@ async fn run_sftp(
                             }
                         }
                     }
+                });
+            }
+
+            SftpCommand::CopyRemote { paths, dest_dir } => {
+                let handle = handle.clone();
+                let events = events.clone();
+                let self_tx = self_tx.clone();
+                transfers.spawn(async move {
+                    let label = format!("{} {}", paths.len(), t("项", "items"));
+                    let _ = events.send(SessionEvent::SftpStatus(format!(
+                        "{} {}...",
+                        t("粘贴", "Pasting"),
+                        label
+                    )));
+                    let dest = format!("{}/", dest_dir.trim_end_matches('/'));
+                    let mut failed = 0usize;
+                    for src in &paths {
+                        // Server-side copy: no bytes cross the local machine.
+                        let cmd = format!("cp -a -- {} {}", sh_quote(src), sh_quote(&dest));
+                        match handle.elevation.exec_shell(&handle.handle, &cmd).await {
+                            Ok(0) => {}
+                            Ok(code) => {
+                                failed += 1;
+                                let _ = events.send(SessionEvent::SftpStatus(format!(
+                                    "{}: cp exit {code} ({src})",
+                                    t("粘贴失败", "Paste failed")
+                                )));
+                            }
+                            Err(e) => {
+                                failed += 1;
+                                let _ = events.send(SessionEvent::SftpStatus(format!(
+                                    "{}: {e} ({src})",
+                                    t("粘贴失败", "Paste failed")
+                                )));
+                            }
+                        }
+                    }
+                    // Show the pasted entries without a manual refresh.
+                    let _ = self_tx.send(SftpCommand::RefreshDir(dest_dir.clone()));
+                    let _ = events.send(SessionEvent::SftpStatus(if failed == 0 {
+                        format!("{} {}", t("已粘贴", "Pasted"), label)
+                    } else {
+                        format!("{} {} / {}", t("已粘贴", "Pasted"), paths.len() - failed, label)
+                    }));
                 });
             }
 
@@ -1896,6 +1995,117 @@ async fn exec_remote_output(
         }
     }
     Ok((status, String::from_utf8_lossy(&output).into_owned()))
+}
+
+/// Socket listing for the 网络 tab: `ss -i` (iproute2) preferred — `-i` adds the
+/// tcp_info byte counters we use for per-connection up/down totals; `netstat`
+/// is the fallback (no byte counters). The `awk` filter keeps only the
+/// `bytes_*` fields of each info line so a busy host doesn't stream hundreds of
+/// kilobytes per sample.
+const NET_CONN_CMD: &str = r#"PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; if command -v ss >/dev/null 2>&1; then s=$(ss -tunapiH 2>/dev/null || ss -tunapi 2>/dev/null); if command -v awk >/dev/null 2>&1; then printf '%s\n' "$s" | awk '/^[ \t]/ { o = ""; for (i = 1; i <= NF; i++) if ($i ~ /^bytes_(acked|received|sent):/) o = o " " $i; print "\t" o; next } { print }'; else printf '%s\n' "$s"; fi; else netstat -tunap 2>/dev/null; fi"#;
+
+/// Identity of a socket across samples, for the rate delta map.
+fn net_conn_key(c: &NetConnection) -> String {
+    format!("{}|{}|{}|{}", c.proto, c.local, c.remote, c.pid)
+}
+
+/// Parse `ss -H -tunap` / `netstat -tunap` rows. Both are whitespace-separated
+/// but order the columns differently; a numeric Recv-Q in column 1 means
+/// netstat. Process info is left empty when the user can't see it.
+fn parse_net_connections(out: &str) -> Vec<NetConnection> {
+    let mut rows: Vec<NetConnection> = Vec::new();
+    for line in out.lines() {
+        // `ss -i` prints a socket's tcp_info on an indented follow-up line.
+        if line.starts_with(' ') || line.starts_with('\t') {
+            if let Some(sock) = rows.last_mut() {
+                parse_net_info(sock, line);
+            }
+            continue;
+        }
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 5 {
+            continue;
+        }
+        let proto = parts[0].to_ascii_lowercase();
+        if !(proto.starts_with("tcp") || proto.starts_with("udp")) {
+            continue;
+        }
+        let mut row = NetConnection {
+            proto: proto.trim_end_matches(|c: char| c.is_ascii_digit()).to_string(),
+            ..Default::default()
+        };
+        if parts[1].parse::<u64>().is_ok() {
+            // netstat: proto recv-q send-q local foreign [state] [pid/prog]
+            row.local = parts[3].to_string();
+            row.remote = parts[4].to_string();
+            for tok in &parts[5..] {
+                if tok.contains('/') {
+                    let mut it = tok.splitn(2, '/');
+                    row.pid = it.next().unwrap_or("").to_string();
+                    row.process = it.next().unwrap_or("").to_string();
+                } else if row.state.is_empty() {
+                    row.state = tok.to_string();
+                }
+            }
+        } else {
+            // ss: netid state recv-q send-q local peer [users:(("prog",pid=…))]
+            if parts.len() < 6 {
+                continue;
+            }
+            row.state = parts[1].to_string();
+            row.local = parts[4].to_string();
+            row.remote = parts[5].to_string();
+            let proc_field = parts[6..].join(" ");
+            if let Some(start) = proc_field.find("((\"") {
+                let rest = &proc_field[start + 3..];
+                if let Some(end) = rest.find('"') {
+                    row.process = rest[..end].to_string();
+                }
+            }
+            if let Some(pi) = proc_field.find("pid=") {
+                row.pid = proc_field[pi + 4..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect();
+            }
+        }
+        rows.push(row);
+        if rows.len() >= 400 {
+            break; // keep the model bounded on busy hosts
+        }
+    }
+    rows
+}
+
+/// Read `ss -i`'s tcp_info line for one socket: `bytes_acked` (or `bytes_sent`
+/// before Linux 4.1) is uploaded, `bytes_received` is downloaded. The SYN/FIN
+/// each count as a byte in `bytes_acked`, so subtract one.
+fn parse_net_info(sock: &mut NetConnection, line: &str) {
+    if !sock.proto.starts_with("tcp") || sock.state == "LISTEN" {
+        return;
+    }
+    let (mut acked, mut sent, mut recv, mut has_acked) = (0u64, 0u64, 0u64, false);
+    for field in line.split_whitespace() {
+        if let Some((name, value)) = field.split_once(':') {
+            let Ok(n) = value.parse::<u64>() else { continue };
+            match name {
+                "bytes_acked" => {
+                    acked = n;
+                    has_acked = true;
+                }
+                "bytes_sent" => sent = n,
+                "bytes_received" => recv = n,
+                _ => {}
+            }
+        }
+    }
+    sock.sent = if has_acked { acked.saturating_sub(1) } else { sent };
+    sock.received = recv;
+    sock.has_bytes = true;
 }
 
 /// Parent directory of a remote path ("/a/b" → "/a", "/a" → "/").
@@ -3397,5 +3607,72 @@ also-bad
         let need = cache.apply(&mut second);
         assert!(need.is_complete());
         assert!(second.iter().all(|e| e.owner.as_deref() == Some("alice")));
+    }
+}
+
+#[cfg(test)]
+mod net_conn_tests {
+    use super::parse_net_connections;
+
+    #[test]
+    fn parses_ss_rows_with_process() {
+        let out = "\
+tcp   LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:((\"sshd\",pid=812,fd=3))
+udp   UNCONN 0 0 0.0.0.0:68 0.0.0.0:* users:((\"dhclient\",pid=567,fd=6))
+tcp   ESTAB 0 0 192.168.1.2:22 192.168.1.3:54321";
+        let rows = parse_net_connections(out);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].proto, "tcp");
+        assert_eq!(rows[0].state, "LISTEN");
+        assert_eq!(rows[0].local, "0.0.0.0:22");
+        assert_eq!(rows[0].pid, "812");
+        assert_eq!(rows[0].process, "sshd");
+        assert_eq!(rows[1].proto, "udp");
+        assert_eq!(rows[1].process, "dhclient");
+        // No process info visible: pid/process stay empty.
+        assert_eq!(rows[2].pid, "");
+        assert_eq!(rows[2].remote, "192.168.1.3:54321");
+    }
+
+    #[test]
+    fn parses_netstat_rows_and_skips_header() {
+        let out = "\
+Active Internet connections (servers and established)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      812/sshd
+udp        0      0 0.0.0.0:68              0.0.0.0:*                           567/dhclient";
+        let rows = parse_net_connections(out);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].state, "LISTEN");
+        assert_eq!(rows[0].pid, "812");
+        assert_eq!(rows[0].process, "sshd");
+        assert_eq!(rows[1].proto, "udp");
+        assert_eq!(rows[1].pid, "567");
+    }
+
+    #[test]
+    fn parses_ss_info_byte_counters() {
+        let out = "\
+tcp ESTAB 0 0 10.0.0.1:22 10.0.0.2:5555 users:((\"sshd\",pid=42,fd=3))
+\t bytes_acked:1001 bytes_received:5000
+tcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:*
+\t bytes_acked:5 bytes_received:6
+udp UNCONN 0 0 0.0.0.0:68 0.0.0.0:*
+\t bytes_acked:7
+tcp ESTAB 0 0 10.0.0.1:80 10.0.0.3:6666
+\t bytes_sent:123 bytes_received:9";
+        let rows = parse_net_connections(out);
+        assert_eq!(rows.len(), 4);
+        // bytes_acked counts SYN/FIN as a byte → subtract one.
+        assert!(rows[0].has_bytes);
+        assert_eq!(rows[0].sent, 1000);
+        assert_eq!(rows[0].received, 5000);
+        // LISTEN and UDP have no per-socket traffic counters.
+        assert!(!rows[1].has_bytes);
+        assert!(!rows[2].has_bytes);
+        // Fallback to bytes_sent when bytes_acked is absent (pre-4.1 kernels).
+        assert!(rows[3].has_bytes);
+        assert_eq!(rows[3].sent, 123);
+        assert_eq!(rows[3].received, 9);
     }
 }

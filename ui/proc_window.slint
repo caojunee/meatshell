@@ -25,6 +25,20 @@ export struct ProcRow {
     own-process: bool, // may terminate without root authentication
 }
 
+/// One socket row in the bottom panel's 网络 (Network) tab.
+export struct NetConnRow {
+    proto: string,     // tcp / udp
+    local: string,     // local address:port
+    remote: string,    // peer address:port
+    state: string,     // ESTAB / LISTEN / UNCONN / …
+    pid: string,
+    process: string,
+    up-rate: string,   // upload speed ("1.2 MB/s") or "—" for UDP
+    down-rate: string, // download speed
+    uploaded: string,  // cumulative upload ("12.3 MB")
+    downloaded: string,// cumulative download
+}
+
 component ProcMenuItem inherits Rectangle {
     in property <string> label;
     callback clicked();

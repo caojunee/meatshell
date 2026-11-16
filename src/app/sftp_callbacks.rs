@@ -1,5 +1,20 @@
 use super::*;
 
+/// In-memory SFTP clipboard: (source tab id, remote path) pairs recorded by
+/// Copy, plus the OS clipboard sequence number at copy time. Nothing is
+/// transferred at copy time — Paste does the actual copy (server-side `cp`
+/// within the same session), so copying a huge file is instant and never pulls
+/// bytes back to the local machine. UI thread only.
+struct InternalClip {
+    items: Vec<(String, String)>,
+    seq: u32,
+}
+
+thread_local! {
+    static SFTP_CLIPBOARD: std::cell::RefCell<InternalClip> =
+        const { std::cell::RefCell::new(InternalClip { items: Vec::new(), seq: 0 }) };
+}
+
 fn choose_download_conflict(
     owner: DialogOwner,
     remote: &str,
@@ -239,6 +254,62 @@ pub(super) fn wire_sftp_callbacks(
             let tab_id = tab_id.to_string();
             let remote_dir = remote_dir.to_string();
             if remote_dir.is_empty() {
+                return;
+            }
+            // MeatShell's own Copy takes priority: transfer the remembered
+            // remote paths now. Same session → server-side `cp` (no local
+            // bytes); another session → the staged remote-to-remote copy.
+            let (clip, clip_seq) =
+                SFTP_CLIPBOARD.with(|c| { let b = c.borrow(); (b.items.clone(), b.seq) });
+            if clipboard_sequence() != clip_seq {
+                // Something was copied in the OS after our in-app Copy (e.g. in
+                // Explorer): the newer OS copy wins; drop the stale internal one.
+                SFTP_CLIPBOARD.with(|c| c.borrow_mut().items.clear());
+            } else if !clip.is_empty() {
+                let mut same: Vec<String> = Vec::new();
+                let mut cross: Vec<(String, Vec<String>)> = Vec::new();
+                for (src_tab, path) in &clip {
+                    if *src_tab == tab_id {
+                        same.push(path.clone());
+                    } else {
+                        match cross.iter_mut().find(|(t, _)| t == src_tab) {
+                            Some((_, ps)) => ps.push(path.clone()),
+                            None => cross.push((src_tab.clone(), vec![path.clone()])),
+                        }
+                    }
+                }
+                let has_cross = !cross.is_empty();
+                if let Ok(handles) = sftp_handles.lock() {
+                    if !same.is_empty() {
+                        if let Some(h) = handles.get(tab_id.as_str()) {
+                            h.copy_remote(same, remote_dir.clone());
+                        }
+                    }
+                    for (src_tab, paths) in cross {
+                        if let (Some(src), Some(dst)) =
+                            (handles.get(src_tab.as_str()), handles.get(tab_id.as_str()))
+                        {
+                            src.copy_to(paths, dst.commands.clone(), remote_dir.clone());
+                        }
+                    }
+                }
+                if has_cross {
+                    w.set_download_open(true);
+                }
+                set_sftp_status(
+                    &w,
+                    &tab_id,
+                    &format!(
+                        "{} {} {} → {remote_dir}",
+                        t("正在粘贴", "Pasting"),
+                        clip.len(),
+                        t("项", "items")
+                    ),
+                );
+                // Platforms without a clipboard change counter: consume the
+                // internal copy so a later OS copy isn't shadowed by it.
+                #[cfg(not(target_os = "windows"))]
+                SFTP_CLIPBOARD.with(|c| c.borrow_mut().items.clear());
                 return;
             }
             let locals = clipboard_upload_paths();
@@ -658,6 +729,44 @@ pub(super) fn wire_sftp_callbacks(
                 clear_sftp_selection(tm, tab_id.as_str());
             },
         );
+    }
+    // Copy = remember the remote paths in the in-memory clipboard; nothing is
+    // transferred now. Paste performs the actual copy, so copying a large file
+    // is instant and stays off the local disk.
+    {
+        let weak = window.as_weak();
+        window.on_sftp_copy_to_clipboard(move |tab_id: SharedString, remote_path: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let terminals = w.get_terminals();
+            let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() else {
+                return;
+            };
+            let mut paths = collect_sftp_selected(tm, tab_id.as_str());
+            if paths.is_empty() && !remote_path.is_empty() {
+                paths.push(remote_path.to_string());
+            }
+            if paths.is_empty() {
+                return;
+            }
+            let n = paths.len();
+            let tab = tab_id.to_string();
+            SFTP_CLIPBOARD.with(|c| {
+                let mut b = c.borrow_mut();
+                b.items = paths.into_iter().map(|p| (tab.clone(), p)).collect();
+                b.seq = clipboard_sequence();
+            });
+            clear_sftp_selection(tm, tab_id.as_str());
+            set_sftp_status(
+                &w,
+                tab_id.as_str(),
+                &format!(
+                    "{} {} {}",
+                    t("已复制", "Copied"),
+                    n,
+                    t("项，粘贴时传输", "items (transferred on paste)")
+                ),
+            );
+        });
     }
     {
         let sftp_handles = sftp_handles.clone();

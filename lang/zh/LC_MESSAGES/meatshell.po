@@ -813,3 +813,81 @@ msgstr "停止记录会话日志"
 
 msgid "Start session log..."
 msgstr "开始记录会话日志..."
+
+msgid "Bookmark this folder"
+msgstr "收藏此文件夹"
+
+msgid "Remove bookmark"
+msgstr "取消收藏"
+
+msgid "Bookmarks and recent folders"
+msgstr "书签与最近访问"
+
+msgid "Parent folder"
+msgstr "上级目录"
+
+msgid "Paste and go"
+msgstr "粘贴并跳转"
+
+msgid "Download selected"
+msgstr "下载所选"
+
+msgid "Delete selected"
+msgstr "删除所选"
+
+msgid "More actions"
+msgstr "更多操作"
+
+msgid "Restore panel"
+msgstr "恢复面板"
+
+msgid "Minimize panel"
+msgstr "最小化面板"
+
+msgid "Network"
+msgstr "网络"
+
+msgid "Interface"
+msgstr "接口"
+
+msgid "No network data"
+msgstr "暂无网络数据"
+
+msgid "Quick command bar"
+msgstr "快捷命令栏"
+
+msgid "No quick commands"
+msgstr "暂无快捷命令"
+
+msgid "Manage..."
+msgstr "管理..."
+
+msgid "Connections"
+msgstr "连接数"
+
+msgid "Protocol"
+msgstr "协议"
+
+msgid "Local address"
+msgstr "本地地址"
+
+msgid "Remote address"
+msgstr "远程地址"
+
+msgid "State"
+msgstr "状态"
+
+msgid "Process"
+msgstr "进程"
+
+msgid "Upload speed"
+msgstr "上传速度"
+
+msgid "Download speed"
+msgstr "下载速度"
+
+msgid "Uploaded"
+msgstr "已上传"
+
+msgid "Downloaded"
+msgstr "已下载"

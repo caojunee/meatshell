@@ -25,6 +25,25 @@ pub(super) fn clipboard_set_text(text: String) {
     }
 }
 
+/// A monotonically increasing counter that bumps on every OS clipboard change
+/// (Windows). Used to tell whether something was copied in the OS *after* an
+/// in-app SFTP Copy, so the newer copy wins at Paste time. Other platforms have
+/// no such counter; return 0 and fall back to one-shot internal clipboard.
+pub(super) fn clipboard_sequence() -> u32 {
+    #[cfg(target_os = "windows")]
+    {
+        #[link(name = "user32")]
+        extern "system" {
+            fn GetClipboardSequenceNumber() -> u32;
+        }
+        unsafe { GetClipboardSequenceNumber() }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        0
+    }
+}
+
 /// Split a stored proxy URL into `(type, host:port)` for the session dialog.
 ///
 /// `""` → `("none", "")`. Recognises `socks5`/`socks5h`/`socks` and

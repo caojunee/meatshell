@@ -816,3 +816,81 @@ msgstr "Stop session log"
 
 msgid "Start session log..."
 msgstr "Start session log..."
+
+msgid "Bookmark this folder"
+msgstr "Bookmark this folder"
+
+msgid "Remove bookmark"
+msgstr "Remove bookmark"
+
+msgid "Bookmarks and recent folders"
+msgstr "Bookmarks and recent folders"
+
+msgid "Parent folder"
+msgstr "Parent folder"
+
+msgid "Paste and go"
+msgstr "Paste and go"
+
+msgid "Download selected"
+msgstr "Download selected"
+
+msgid "Delete selected"
+msgstr "Delete selected"
+
+msgid "More actions"
+msgstr "More actions"
+
+msgid "Restore panel"
+msgstr "Restore panel"
+
+msgid "Minimize panel"
+msgstr "Minimize panel"
+
+msgid "Network"
+msgstr "Network"
+
+msgid "Interface"
+msgstr "Interface"
+
+msgid "No network data"
+msgstr "No network data"
+
+msgid "Quick command bar"
+msgstr "Quick command bar"
+
+msgid "No quick commands"
+msgstr "No quick commands"
+
+msgid "Manage..."
+msgstr "Manage..."
+
+msgid "Connections"
+msgstr "Connections"
+
+msgid "Protocol"
+msgstr "Protocol"
+
+msgid "Local address"
+msgstr "Local address"
+
+msgid "Remote address"
+msgstr "Remote address"
+
+msgid "State"
+msgstr "State"
+
+msgid "Process"
+msgstr "Process"
+
+msgid "Upload speed"
+msgstr "Upload speed"
+
+msgid "Download speed"
+msgstr "Download speed"
+
+msgid "Uploaded"
+msgstr "Uploaded"
+
+msgid "Downloaded"
+msgstr "Downloaded"
