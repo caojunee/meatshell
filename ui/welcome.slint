@@ -260,8 +260,19 @@ component SessionRow inherits Rectangle {
         animate background { duration: 120ms; }
         animate drop-shadow-blur { duration: 120ms; }
 
+    // Vertical guide line: sessions sit under a group header, so a faint line
+    // dropped from the header's chevron makes the nesting obvious. It extends
+    // 2px past the card to bridge the list's row spacing.
+    Rectangle {
+        x: 12px;
+        y: 0px;
+        width: 1px;
+        height: parent.height + 2px;
+        background: Theme.border-subtle;
+    }
+
     HorizontalLayout {
-        padding-left: root.compact ? 14px : 10px;
+        padding-left: root.compact ? 30px : 26px;
         padding-right: root.compact ? 8px : 10px;
         spacing: root.compact ? 10px : 12px;
 
